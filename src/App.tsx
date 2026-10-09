@@ -146,6 +146,11 @@ const App = () => {
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [selectedFloor, setSelectedFloor] = useState<string>('');
   
+  // Billing Tab Filter States
+  const [billingSearch, setBillingSearch] = useState<string>('');
+  const [billingStatusFilter, setBillingStatusFilter] = useState<string>('all');
+  const [billingBuildingFilter, setBillingBuildingFilter] = useState<string>('all');
+  
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [selectedBill, setSelectedBill] = useState(null);
   const [selectedContractRoom, setSelectedContractRoom] = useState(null);
@@ -2182,70 +2187,563 @@ const App = () => {
           );
         })()}
 
-        {activeTab === 'billing' && (
-          <div className="space-y-6 print:hidden">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div className="space-y-4">
-                  <h3 className="font-bold flex items-center gap-2 text-blue-600"><Calculator size={18} /> อัตราค่าบริการ (Sync)</h3>
-                  <div className="grid grid-cols-3 gap-4">
-                      <div><label className="block text-[10px] font-bold text-gray-400 uppercase">ไฟฟ้า (บ./หน่วย)</label><input type="number" disabled={authRole !== 'admin'} className="w-full p-2 border rounded-xl disabled:bg-gray-100" value={rates.elecRate || ''} onChange={e => handleUpdateRates({...rates, elecRate: parseFloat(e.target.value) || 0})} /></div>
+        {activeTab === 'billing' && (() => {
+          // Calculate filtered bills
+          const buildingsList: string[] = Array.from(new Set<string>(bills.map(b => String(b.building || '')))).filter(Boolean).sort();
+          
+          const filteredBills = bills.filter(b => {
+            const matchBuilding = billingBuildingFilter === 'all' || b.building === billingBuildingFilter;
+            const matchStatus = billingStatusFilter === 'all' || b.status === billingStatusFilter;
+            const q = billingSearch.trim().toLowerCase();
+            const matchSearch = !q || 
+              String(b.id || '').toLowerCase().includes(q) ||
+              String(b.roomId || '').toLowerCase().includes(q) ||
+              String(b.building || '').toLowerCase().includes(q) ||
+              String(b.tenantName || '').toLowerCase().includes(q);
+            return matchBuilding && matchStatus && matchSearch;
+          });
+
+          // Summary Metrics
+          const totalBilledAmount = bills.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
+          const paidBills = bills.filter(b => b.status === 'paid');
+          const paidAmount = paidBills.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
+          const pendingOrUnpaidBills = bills.filter(b => b.status !== 'paid');
+          const pendingOrUnpaidAmount = pendingOrUnpaidBills.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
+
+          const selectedRoomForMeter = rooms.find(rm => `${rm.id} (${rm.building})` === newMeter.roomId);
+
+          // Calculations for meter form preview
+          const currElecNum = parseFloat(String(newMeter.currElec));
+          const prevElecNum = parseFloat(String(newMeter.prevElec)) || 0;
+          const elecDiff = !isNaN(currElecNum) ? Math.max(0, currElecNum - prevElecNum) : 0;
+          const estimatedElecCost = elecDiff * (rates.elecRate || 0);
+
+          const currWaterNum = parseFloat(String(newMeter.currWater));
+          const prevWaterNum = parseFloat(String(newMeter.prevWater)) || 0;
+          const waterDiff = !isNaN(currWaterNum) ? Math.max(0, currWaterNum - prevWaterNum) : 0;
+          const estimatedWaterCost = rates.waterBillingType === 'fixed' 
+            ? (rates.waterFixedRate || 150) 
+            : waterDiff * (rates.waterRate || 0);
+
+          const estimatedTotal = selectedRoomForMeter 
+            ? (selectedRoomForMeter.price || 0) + estimatedElecCost + estimatedWaterCost 
+            : 0;
+
+          return (
+            <div className="space-y-4 sm:space-y-6 print:hidden">
+              {/* Top Configuration & Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                {/* Rates Configuration Card */}
+                <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-bold flex items-center gap-2 text-blue-600 text-sm sm:text-base">
+                        <Calculator size={18} /> อัตราค่าบริการ (Sync Cloud)
+                      </h3>
+                      <span className="text-[11px] font-semibold text-gray-400 bg-gray-50 px-2 py-0.5 rounded-lg border">
+                        {authRole === 'admin' ? 'แก้ไขได้' : 'ดูอย่างเดียว'}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Elec Rate */}
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase">ประเภทค่าน้ำ</label>
-                        <select disabled={authRole !== 'admin'} className="w-full p-2 border rounded-xl disabled:bg-gray-100" value={rates.waterBillingType || 'unit'} onChange={e => handleUpdateRates({...rates, waterBillingType: e.target.value})}>
-                          <option value="unit">ตามหน่วย (บ./หน่วย)</option>
-                          <option value="fixed">เหมาจ่าย (บ./เดือน)</option>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">
+                          ไฟฟ้า (บ./หน่วย)
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            step="any"
+                            disabled={authRole !== 'admin'} 
+                            className="w-full p-2 sm:p-2.5 text-sm font-semibold border rounded-xl disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:outline-none" 
+                            value={rates.elecRate || ''} 
+                            onChange={e => handleUpdateRates({...rates, elecRate: parseFloat(e.target.value) || 0})} 
+                          />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">฿</span>
+                        </div>
+                      </div>
+
+                      {/* Water Type */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">
+                          ประเภทค่าน้ำ
+                        </label>
+                        <select 
+                          disabled={authRole !== 'admin'} 
+                          className="w-full p-2 sm:p-2.5 text-sm font-medium border rounded-xl disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white" 
+                          value={rates.waterBillingType || 'unit'} 
+                          onChange={e => handleUpdateRates({...rates, waterBillingType: e.target.value})}
+                        >
+                          <option value="unit">ตามหน่วย (บ./น.)</option>
+                          <option value="fixed">เหมาจ่าย (บ./ด.)</option>
                         </select>
                       </div>
-                      {(rates.waterBillingType === 'fixed') ? (
-                          <div><label className="block text-[10px] font-bold text-gray-400 uppercase">น้ำเหมาจ่าย (บ./เดือน)</label><input type="number" disabled={authRole !== 'admin'} className="w-full p-2 border rounded-xl disabled:bg-gray-100" value={rates.waterFixedRate || 150} onChange={e => handleUpdateRates({...rates, waterFixedRate: parseFloat(e.target.value) || 0})} /></div>
-                      ) : (
-                          <div><label className="block text-[10px] font-bold text-gray-400 uppercase">น้ำ (บ./หน่วย)</label><input type="number" disabled={authRole !== 'admin'} className="w-full p-2 border rounded-xl disabled:bg-gray-100" value={rates.waterRate || ''} onChange={e => handleUpdateRates({...rates, waterRate: parseFloat(e.target.value) || 0})} /></div>
-                      )}
+
+                      {/* Water Rate */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1 truncate">
+                          {rates.waterBillingType === 'fixed' ? 'น้ำเหมา (บ./ด.)' : 'น้ำ (บ./หน่วย)'}
+                        </label>
+                        <div className="relative">
+                          {rates.waterBillingType === 'fixed' ? (
+                            <input 
+                              type="number" 
+                              step="any"
+                              disabled={authRole !== 'admin'} 
+                              className="w-full p-2 sm:p-2.5 text-sm font-semibold border rounded-xl disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:outline-none" 
+                              value={rates.waterFixedRate || 150} 
+                              onChange={e => handleUpdateRates({...rates, waterFixedRate: parseFloat(e.target.value) || 0})} 
+                            />
+                          ) : (
+                            <input 
+                              type="number" 
+                              step="any"
+                              disabled={authRole !== 'admin'} 
+                              className="w-full p-2 sm:p-2.5 text-sm font-semibold border rounded-xl disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:outline-none" 
+                              value={rates.waterRate || ''} 
+                              onChange={e => handleUpdateRates({...rates, waterRate: parseFloat(e.target.value) || 0})} 
+                            />
+                          )}
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">฿</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-               </div>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-               <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border h-fit">
-                  <h3 className="font-bold mb-4 flex items-center gap-2 text-orange-500"><Zap size={18} /> จดมิเตอร์ใหม่ลง Cloud</h3>
+                </div>
+
+                {/* Quick Billing Stats Summary Card */}
+                <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold flex items-center gap-2 text-gray-800 text-sm sm:text-base">
+                      <Receipt size={18} className="text-emerald-600" /> สรุปยอดเรียกเก็บทั้งหมด
+                    </h3>
+                    <span className="text-xs font-bold text-gray-500">
+                      รวม {bills.length} บิล
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    {/* Total Billed */}
+                    <div className="bg-gray-50 p-2 sm:p-2.5 rounded-xl border border-gray-100 text-center min-w-0">
+                      <span className="text-[10px] sm:text-xs text-gray-500 block font-medium">ยอดออกบิล</span>
+                      <span className="text-sm sm:text-base md:text-lg font-black text-gray-900 block truncate">
+                        {totalBilledAmount.toLocaleString()} ฿
+                      </span>
+                      <span className="text-[10px] text-gray-400 font-semibold">{bills.length} รายการ</span>
+                    </div>
+
+                    {/* Paid */}
+                    <div className="bg-emerald-50/70 p-2 sm:p-2.5 rounded-xl border border-emerald-100 text-center min-w-0">
+                      <span className="text-[10px] sm:text-xs text-emerald-700 block font-medium">ชำระแล้ว</span>
+                      <span className="text-sm sm:text-base md:text-lg font-black text-emerald-700 block truncate">
+                        {paidAmount.toLocaleString()} ฿
+                      </span>
+                      <span className="text-[10px] text-emerald-600 font-semibold">{paidBills.length} รายการ</span>
+                    </div>
+
+                    {/* Pending / Unpaid */}
+                    <div className="bg-amber-50/70 p-2 sm:p-2.5 rounded-xl border border-amber-100 text-center min-w-0">
+                      <span className="text-[10px] sm:text-xs text-amber-800 block font-medium">ค้างชำระ</span>
+                      <span className="text-sm sm:text-base md:text-lg font-black text-amber-700 block truncate">
+                        {pendingOrUnpaidAmount.toLocaleString()} ฿
+                      </span>
+                      <span className="text-[10px] text-amber-600 font-semibold">{pendingOrUnpaidBills.length} รายการ</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content: Meter Entry (Left) + Bills List (Right) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+                {/* Meter Form Entry */}
+                <div className="lg:col-span-5 xl:col-span-4 bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-gray-100 h-fit space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold flex items-center gap-2 text-orange-500 text-sm sm:text-base">
+                      <Zap size={18} /> จดมิเตอร์ใหม่ลง Cloud
+                    </h3>
+                    <span className="text-[11px] font-semibold text-gray-400">ระบบคำนวณอัตโนมัติ</span>
+                  </div>
+
                   {authRole === 'admin' ? (
                     <form onSubmit={handleAddBill} className="space-y-4">
-                      <select className="w-full p-2.5 border rounded-xl bg-gray-50" required value={newMeter.roomId} onChange={e => { const r = rooms.find(rm => `${rm.id} (${rm.building})` === e.target.value); if(r) setNewMeter({...newMeter, roomId: e.target.value, prevElec: r.lastElec, prevWater: r.lastWater}) }}>
-                          <option value="">เลือกห้องที่เข้าพัก...</option>
-                          {rooms.filter(r => r.status === 'occupied').map(r => (<option key={`${r.building}-${r.id}`} value={`${r.id} (${r.building})`}>ตึก {r.building} - ห้อง {r.id} ({r.tenant})</option>))}
-                      </select>
-                      <div className="grid grid-cols-2 gap-3"><input type="number" readOnly className="p-2 border rounded-lg bg-gray-50" value={newMeter.prevElec} /><input type="number" required placeholder="ไฟฟ้าใหม่" className="p-2 border rounded-lg" value={newMeter.currElec} onChange={e => setNewMeter({...newMeter, currElec: e.target.value})} /></div>
-                      {rates.waterBillingType !== 'fixed' && (
-                        <div className="grid grid-cols-2 gap-3"><input type="number" readOnly className="p-2 border rounded-lg bg-gray-50" value={newMeter.prevWater} /><input type="number" required placeholder="น้ำประปาใหม่" className="p-2 border rounded-lg" value={newMeter.currWater} onChange={e => setNewMeter({...newMeter, currWater: e.target.value})} /></div>
+                      {/* Select Room */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          เลือกห้องพักที่เข้าพัก *
+                        </label>
+                        <select 
+                          className="w-full p-2.5 sm:p-3 border rounded-xl bg-gray-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium" 
+                          required 
+                          value={newMeter.roomId} 
+                          onChange={e => { 
+                            const r = rooms.find(rm => `${rm.id} (${rm.building})` === e.target.value); 
+                            if(r) setNewMeter({...newMeter, roomId: e.target.value, prevElec: r.lastElec, prevWater: r.lastWater});
+                            else setNewMeter({...newMeter, roomId: '', prevElec: 0, prevWater: 0});
+                          }}
+                        >
+                          <option value="">-- เลือกห้องพักที่เข้าพัก --</option>
+                          {rooms.filter(r => r.status === 'occupied').map(r => (
+                            <option key={`${r.building}-${r.id}`} value={`${r.id} (${r.building})`}>
+                              ตึก {r.building} - ห้อง {r.id} ({r.tenant})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Selected Room Info Badge */}
+                      {selectedRoomForMeter && (
+                        <div className="bg-blue-50/70 border border-blue-100 p-2.5 rounded-xl text-xs space-y-1">
+                          <div className="flex justify-between items-center text-blue-900 font-bold">
+                            <span>ตึก {selectedRoomForMeter.building} · ห้อง {selectedRoomForMeter.id}</span>
+                            <span>ค่าเช่า {selectedRoomForMeter.price.toLocaleString()} ฿/ด.</span>
+                          </div>
+                          <p className="text-gray-600 text-[11px]">ผู้เช่า: <span className="font-semibold text-gray-800">{selectedRoomForMeter.tenant}</span></p>
+                        </div>
                       )}
-                      <button type="submit" className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md">ออกบิล Cloud</button>
+
+                      {/* Electricity Meter Inputs */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                            <Zap size={14} className="text-amber-500" /> มิเตอร์ไฟฟ้า (หน่วย)
+                          </label>
+                          <span className="text-[11px] text-gray-500 font-medium">อัตรา {rates.elecRate} บ./น.</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="block text-[10px] font-bold text-gray-400 mb-1">เลขเดิม (ครั้งก่อน)</span>
+                            <input 
+                              type="number" 
+                              readOnly 
+                              className="w-full p-2 border rounded-xl bg-gray-100 text-gray-700 text-sm font-semibold text-center" 
+                              value={newMeter.prevElec} 
+                            />
+                          </div>
+                          <div>
+                            <span className="block text-[10px] font-bold text-blue-600 mb-1">เลขใหม่ (ครั้งนี้) *</span>
+                            <input 
+                              type="number" 
+                              required 
+                              placeholder="กรอกเลขใหม่" 
+                              className="w-full p-2 border border-blue-200 rounded-xl bg-blue-50/30 focus:bg-white text-sm font-semibold text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                              value={newMeter.currElec} 
+                              onChange={e => setNewMeter({...newMeter, currElec: e.target.value})} 
+                            />
+                          </div>
+                        </div>
+                        {newMeter.currElec !== '' && !isNaN(parseFloat(String(newMeter.currElec))) && (
+                          <div className="text-[11px] bg-amber-50 text-amber-800 p-2 rounded-lg flex justify-between font-medium border border-amber-100">
+                            <span>ใช้ไฟ: {elecDiff} หน่วย</span>
+                            <span className="font-bold">~{estimatedElecCost.toLocaleString()} ฿</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Water Meter Inputs */}
+                      {rates.waterBillingType !== 'fixed' ? (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                              <Droplets size={14} className="text-blue-500" /> มิเตอร์น้ำประปา (หน่วย)
+                            </label>
+                            <span className="text-[11px] text-gray-500 font-medium">อัตรา {rates.waterRate} บ./น.</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <span className="block text-[10px] font-bold text-gray-400 mb-1">เลขเดิม (ครั้งก่อน)</span>
+                              <input 
+                                type="number" 
+                                readOnly 
+                                className="w-full p-2 border rounded-xl bg-gray-100 text-gray-700 text-sm font-semibold text-center" 
+                                value={newMeter.prevWater} 
+                              />
+                            </div>
+                            <div>
+                              <span className="block text-[10px] font-bold text-blue-600 mb-1">เลขใหม่ (ครั้งนี้) *</span>
+                              <input 
+                                type="number" 
+                                required 
+                                placeholder="กรอกเลขใหม่" 
+                                className="w-full p-2 border border-blue-200 rounded-xl bg-blue-50/30 focus:bg-white text-sm font-semibold text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                                value={newMeter.currWater} 
+                                onChange={e => setNewMeter({...newMeter, currWater: e.target.value})} 
+                              />
+                            </div>
+                          </div>
+                          {newMeter.currWater !== '' && !isNaN(parseFloat(String(newMeter.currWater))) && (
+                            <div className="text-[11px] bg-blue-50 text-blue-800 p-2 rounded-lg flex justify-between font-medium border border-blue-100">
+                              <span>ใช้น้ำ: {waterDiff} หน่วย</span>
+                              <span className="font-bold">~{estimatedWaterCost.toLocaleString()} ฿</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-2.5 bg-blue-50/60 border border-blue-100 rounded-xl flex items-center justify-between text-xs text-blue-800">
+                          <span className="flex items-center gap-1 font-medium"><Droplets size={14} /> ค่าน้ำประปาเหมาจ่าย:</span>
+                          <span className="font-bold">{rates.waterFixedRate || 150} ฿/เดือน</span>
+                        </div>
+                      )}
+
+                      {/* Estimated Grand Total Preview */}
+                      {selectedRoomForMeter && (newMeter.currElec !== '' || rates.waterBillingType === 'fixed') && (
+                        <div className="bg-gray-900 text-white p-3 rounded-xl flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-gray-400 block font-medium">ประมาณการยอดบิล</span>
+                            <span className="text-xs text-gray-300">ค่าเช่า + ไฟ + น้ำ</span>
+                          </div>
+                          <span className="text-lg font-black text-amber-400">
+                            {estimatedTotal.toLocaleString()} ฿
+                          </span>
+                        </div>
+                      )}
+
+                      <button 
+                        type="submit" 
+                        className="w-full py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+                      >
+                        <FileText size={16} /> <span>ออกบิล & ดูใบแจ้งหนี้</span>
+                      </button>
                     </form>
                   ) : (
-                    <div className="p-4 bg-gray-50 rounded-xl border border-dashed flex flex-col items-center justify-center text-gray-400">
+                    <div className="p-6 bg-gray-50 rounded-xl border border-dashed flex flex-col items-center justify-center text-gray-400">
                       <Lock size={32} className="mb-2 opacity-50" />
                       <p className="text-xs font-bold uppercase mt-2">สงวนสิทธิ์สำหรับ Admin</p>
                     </div>
                   )}
-               </div>
-               <div className="lg:col-span-2 space-y-4">
-                  {bills.map(bill => (
-                    <div key={bill.id} className="bg-white p-5 rounded-2xl border flex justify-between items-center shadow-sm">
-                      <div className="flex items-center gap-4"><div className="bg-gray-100 p-3 rounded-xl"><FileText className="text-gray-400" size={24} /></div><div><p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest text-xs">#{bill.id} | ห้อง {bill.roomId} ({bill.building})</p><h4 className="font-black text-2xl">{bill.total.toLocaleString()} ฿</h4></div></div>
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => { setSelectedBill(bill); setIsPreviewModalOpen(true); }} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={24} /></button>
-                        {bill.slipImage && authRole === 'admin' && (
-                           <button onClick={(e) => { e.stopPropagation(); setExpandedImage(bill.slipImage); }} className="p-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg" title="ดูสลิปที่แนบมา"><ImageIcon size={24} /></button>
+                </div>
+
+                {/* Bills List & Management (Right) */}
+                <div className="lg:col-span-7 xl:col-span-8 space-y-3 sm:space-y-4">
+                  {/* Toolbar & Filters */}
+                  <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FileText size={18} className="text-blue-600 shrink-0" />
+                        <h4 className="font-bold text-gray-900 text-sm sm:text-base">
+                          รายการบิลค่าเช่า ({filteredBills.length})
+                        </h4>
+                      </div>
+
+                      {/* Building Filter Dropdown */}
+                      {buildingsList.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-gray-400 font-semibold hidden sm:inline">ตึก:</span>
+                          <select 
+                            value={billingBuildingFilter} 
+                            onChange={e => setBillingBuildingFilter(e.target.value)}
+                            className="p-1.5 sm:p-2 text-xs font-bold border rounded-xl bg-gray-50 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="all">ทุกอาคาร ({bills.length})</option>
+                            {buildingsList.map(b => (
+                              <option key={b} value={b}>ตึก {b}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Search & Status Filters */}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input 
+                          type="text" 
+                          placeholder="ค้นหาเลขบิล, ห้อง, หรือชื่อผู้เช่า..." 
+                          value={billingSearch} 
+                          onChange={e => setBillingSearch(e.target.value)} 
+                          className="w-full pl-9 pr-3 py-1.5 sm:py-2 text-xs sm:text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        />
+                        {billingSearch && (
+                          <button 
+                            type="button" 
+                            onClick={() => setBillingSearch('')} 
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          >
+                            <X size={14} />
+                          </button>
                         )}
-                        <button onClick={() => authRole === 'admin' && toggleBillStatus(bill)} className={`text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-sm ${bill.status === 'paid' ? 'bg-green-100 text-green-700' : bill.status === 'pending' ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'} ${authRole === 'admin' ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}>
-                          {bill.status === 'paid' ? '✔ ชำระแล้ว' : bill.status === 'pending' ? 'รอตรวจสอบสลิป' : 'ค้างชำระ'}
+                      </div>
+
+                      {/* Status Tabs */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 shrink-0">
+                        <button 
+                          type="button"
+                          onClick={() => setBillingStatusFilter('all')}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                            billingStatusFilter === 'all' 
+                              ? 'bg-blue-600 text-white shadow-xs' 
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          ทั้งหมด ({bills.length})
                         </button>
-                        {authRole === 'admin' && <button onClick={() => handleDeleteBill(bill.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="ลบบิล"><Trash2 size={20} /></button>}
+                        <button 
+                          type="button"
+                          onClick={() => setBillingStatusFilter('unpaid')}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                            billingStatusFilter === 'unpaid' 
+                              ? 'bg-rose-600 text-white shadow-xs' 
+                              : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                          }`}
+                        >
+                          ค้างชำระ ({bills.filter(b => b.status === 'unpaid').length})
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setBillingStatusFilter('pending')}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                            billingStatusFilter === 'pending' 
+                              ? 'bg-amber-600 text-white shadow-xs' 
+                              : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                          }`}
+                        >
+                          รอตรวจสลิป ({bills.filter(b => b.status === 'pending').length})
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setBillingStatusFilter('paid')}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                            billingStatusFilter === 'paid' 
+                              ? 'bg-emerald-600 text-white shadow-xs' 
+                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          }`}
+                        >
+                          ชำระแล้ว ({paidBills.length})
+                        </button>
                       </div>
                     </div>
-                  ))}
-               </div>
+                  </div>
+
+                  {/* Bills Cards List */}
+                  {filteredBills.length === 0 ? (
+                    <div className="bg-white p-8 rounded-2xl border text-center text-gray-400 space-y-2">
+                      <Receipt size={40} className="mx-auto text-gray-300" />
+                      <p className="font-bold text-gray-600 text-sm">ไม่พบบิลตามเงื่อนไขที่เลือก</p>
+                      <p className="text-xs text-gray-400">กรุณาเลือกเงื่อนไขอื่น หรือกดออกบิลใหม่จากแบบฟอร์มด้านซ้าย</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredBills.map(bill => (
+                        <div 
+                          key={bill.id} 
+                          className="bg-white p-3.5 sm:p-5 rounded-2xl border border-gray-100 shadow-xs hover:shadow-md transition-all flex flex-col gap-3"
+                        >
+                          {/* Top Row: Room & Tenant on Left, Grand Total on Right */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
+                                <FileText size={20} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-black text-sm sm:text-base text-gray-900">
+                                    ห้อง {bill.roomId}
+                                  </span>
+                                  <span className="text-[11px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md border border-blue-100">
+                                    ตึก {bill.building}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-600 truncate mt-0.5 font-medium">
+                                  {bill.tenantName || 'ผู้เช่า'}
+                                </p>
+                                <p className="text-[10px] font-mono text-gray-400 mt-0.5 truncate">
+                                  #{bill.id} · {bill.date}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="text-right shrink-0">
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">ยอดสุทธิ</span>
+                              <span className="font-black text-lg sm:text-2xl text-gray-900 tracking-tight block">
+                                {bill.total?.toLocaleString()} ฿
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Middle Row: Usage Breakdown Chips */}
+                          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-[10px] sm:text-xs bg-gray-50/90 p-2 sm:p-2.5 rounded-xl border border-gray-100">
+                            <div className="text-center min-w-0">
+                              <span className="text-[10px] text-gray-400 block font-medium">ค่าเช่าห้อง</span>
+                              <span className="font-bold text-gray-800 truncate block">{bill.rent?.toLocaleString()} ฿</span>
+                            </div>
+                            <div className="text-center border-x border-gray-200/70 px-1 min-w-0">
+                              <span className="text-[10px] text-gray-400 block font-medium">ไฟ ({bill.elecUnits ?? 0} น.)</span>
+                              <span className="font-bold text-amber-600 truncate block">{bill.electricity?.toLocaleString()} ฿</span>
+                            </div>
+                            <div className="text-center min-w-0">
+                              <span className="text-[10px] text-gray-400 block font-medium">น้ำ {bill.waterUnits !== null && bill.waterUnits !== undefined ? `(${bill.waterUnits} น.)` : '(เหมา)'}</span>
+                              <span className="font-bold text-blue-600 truncate block">{bill.water?.toLocaleString()} ฿</span>
+                            </div>
+                          </div>
+
+                          {/* Bottom Row: Status Badge on Left, Action Buttons on Right */}
+                          <div className="pt-2 sm:pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                            {/* Status Toggle Button */}
+                            <button 
+                              type="button"
+                              onClick={() => authRole === 'admin' && toggleBillStatus(bill)}
+                              disabled={authRole !== 'admin'}
+                              className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all shadow-2xs flex items-center gap-1.5 shrink-0 ${
+                                bill.status === 'paid' 
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                                  : bill.status === 'pending' 
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200' 
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              } ${authRole === 'admin' ? 'hover:opacity-85 cursor-pointer active:scale-95' : 'cursor-default'}`}
+                              title={authRole === 'admin' ? 'คลิกเพื่อเปลี่ยนสถานะชำระเงิน' : undefined}
+                            >
+                              {bill.status === 'paid' && <CheckCircle size={14} className="text-emerald-600" />}
+                              {bill.status === 'pending' && <Clock size={14} className="text-amber-600" />}
+                              {bill.status === 'unpaid' && <AlertCircle size={14} className="text-rose-600" />}
+                              <span>
+                                {bill.status === 'paid' ? '✔ ชำระแล้ว' : bill.status === 'pending' ? 'รอตรวจสอบสลิป' : 'ค้างชำระ'}
+                              </span>
+                            </button>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
+                              <button 
+                                type="button"
+                                onClick={() => { setSelectedBill(bill); setIsPreviewModalOpen(true); }} 
+                                className="px-2.5 sm:px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl flex items-center gap-1 transition-colors active:scale-95"
+                                title="ดูตัวอย่างและพิมพ์ใบแจ้งหนี้"
+                              >
+                                <Eye size={15} /> <span>ดูบิล</span>
+                              </button>
+
+                              {bill.slipImage && authRole === 'admin' && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setExpandedImage(bill.slipImage); }} 
+                                  className="px-2.5 sm:px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl flex items-center gap-1 transition-colors active:scale-95" 
+                                  title="ดูสลิปโอนเงินที่แนบมา"
+                                >
+                                  <ImageIcon size={15} /> <span>สลิป</span>
+                                </button>
+                              )}
+
+                              {authRole === 'admin' && (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDeleteBill(bill.id)} 
+                                  className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors active:scale-95" 
+                                  title="ลบบิลนี้"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'billDesign' && (
           <div className="max-w-4xl mx-auto space-y-8">
