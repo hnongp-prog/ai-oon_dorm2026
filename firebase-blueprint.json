@@ -1,0 +1,144 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "Information about a physical room and its tenant",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Room number, e.g. '101'" },
+        "building": { "type": "string" },
+        "floor": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "occupied", "reserved", "pending_review"] },
+        "tenant": { "type": "string" },
+        "type": { "type": "string", "enum": ["Fan", "Air"] },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "idCard": { "type": "string" },
+        "phone": { "type": "string" },
+        "parentName": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "contractId": { "type": "string" },
+        "deposit": { "type": "string" },
+        "initialTotal": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "rules": { "type": "string" },
+        "violationDetails": { "type": "string" },
+        "idCardImage": { "type": "string" },
+        "bookingInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "phone": { "type": "string" },
+            "slipImage": { "type": "string" },
+            "timestamp": { "type": "string" }
+          }
+        },
+        "lastElec": { "type": "number" },
+        "lastWater": { "type": "number" }
+      },
+      "required": ["id", "building", "floor", "status", "type", "price"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "A monthly bill for a room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "roomId": { "type": "string" },
+        "building": { "type": "string" },
+        "tenantName": { "type": "string" },
+        "elecUnits": { "type": "number" },
+        "waterUnits": { "type": "number" },
+        "electricity": { "type": "number" },
+        "water": { "type": "number" },
+        "rent": { "type": "number" },
+        "total": { "type": "number" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["paid", "unpaid"] }
+      },
+      "required": ["id", "roomId", "building", "elecUnits", "waterUnits", "electricity", "water", "rent", "total", "date", "status"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An expense of the dorm",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["id", "title", "amount", "category", "date"]
+    },
+    "Maintenance": {
+      "title": "Maintenance",
+      "description": "A maintenance request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "roomId": { "type": "string" },
+        "issue": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "date": { "type": "string" },
+        "image": { "type": "string" }
+      },
+      "required": ["id", "roomId", "issue", "status", "date"]
+    },
+    "GeneralConfig": {
+       "title": "GeneralConfig",
+       "description": "General dorm configuration",
+       "type": "object",
+       "properties": {
+          "dormName": { "type": "string" },
+          "address": { "type": "string" },
+          "phone": { "type": "string" },
+          "taxId": { "type": "string" },
+          "bankName": { "type": "string" },
+          "accountNumber": { "type": "string" },
+          "accountName": { "type": "string" },
+          "logoUrl": { "type": "string" },
+          "qrCodeUrl": { "type": "string" }
+       }
+    },
+    "RatesConfig": {
+       "title": "RatesConfig",
+       "description": "Dorm utility rates",
+       "type": "object",
+       "properties": {
+          "elecRate": { "type": "number" },
+          "waterRate": { "type": "number" }
+       }
+    }
+  },
+  "firestore": {
+    "/artifacts/{appId}/public/data/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Stores room configurations and tenant details."
+    },
+    "/artifacts/{appId}/public/data/bills/{billId}": {
+      "schema": { "$ref": "#/entities/Bill" },
+      "description": "Stores generated bills."
+    },
+    "/artifacts/{appId}/public/data/expenses/{expenseId}": {
+       "schema": { "$ref": "#/entities/Expense" },
+       "description": "Stores expenses."
+    },
+    "/artifacts/{appId}/public/data/maintenance/{maintenanceId}": {
+       "schema": { "$ref": "#/entities/Maintenance" },
+       "description": "Stores maintenance requests."
+    },
+    "/artifacts/{appId}/public/data/config/general": {
+       "schema": { "$ref": "#/entities/GeneralConfig" },
+       "description": "General settings for the dorm."
+    },
+    "/artifacts/{appId}/public/data/config/rates": {
+       "schema": { "$ref": "#/entities/RatesConfig" },
+       "description": "Utility rates configuration."
+    }
+  }
+}

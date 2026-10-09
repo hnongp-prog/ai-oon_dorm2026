@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /artifacts/{appId}/public/data {
+      match /rooms/{roomId} {
+        allow read, write: if true;
+      }
+      match /bills/{billId} {
+        allow read, write: if true;
+      }
+      match /expenses/{expenseId} {
+        allow read, write: if true;
+      }
+      match /maintenance/{maintenanceId} {
+        allow read, write: if true;
+      }
+      match /config/{configId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

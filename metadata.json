@@ -1,0 +1,8 @@
+{
+  "name": " ระบบจัดการหอพัก ไออุ่น",
+  "description": " ระบบจัดการหอพัก/ห้องเช่า Dorm Manager",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
