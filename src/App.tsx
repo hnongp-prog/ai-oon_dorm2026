@@ -5,8 +5,10 @@ import {
   Layers, UserMinus, X, ImageIcon, Phone, CreditCard, UserCheck, ShieldAlert, 
   Calculator, Clock, CheckCircle, Receipt, Wallet, Upload, Eye, Settings, 
   QrCode, MapPin, TrendingUp, Calendar, Camera, ClipboardList, User, FileSearch, 
-  AlertTriangle, Gavel, Lock, BadgeCheck, History, Send, ImagePlus, Menu, Key, ChevronRight
+  AlertTriangle, Gavel, Lock, BadgeCheck, History, Send, ImagePlus, Menu, Key, ChevronRight,
+  Sparkles, Loader2
 } from 'lucide-react';
+import { GoogleGenAI } from '@google/genai';
 
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
@@ -106,6 +108,42 @@ const compressImage = (file, maxSizeMB = 1) => {
   });
 };
 
+export const DEFAULT_DORM_RULES = `1. เวลาเข้า-ออก และการกลับหอพัก (Curfew & Attendance)
+• เวลาเข้าหอพักปกติ: วันจันทร์ - พฤหัสบดี ต้องกลับเข้าหอพักภายในเวลา 20:00 น. / วันศุกร์ - อาทิตย์ และวันหยุดนักขัตฤกษ์ ภายในเวลา 21:00 น.
+• การออกนอกพื้นที่: หากมีความจำเป็นต้องออกนอกหอพักหลังเวลาดังกล่าว ต้องแจ้งผู้ดูแลหอพักล่วงหน้าและได้รับอนุญาตจากผู้ปกครองทุกครั้ง
+• การค้างคืนนอกหอพัก: อนุญาตให้ค้างคืนนอกหอพักได้เฉพาะกรณีมีผู้ปกครองมารับหรือทำหนังสือยินยอมเป็นลายลักษณ์อักษรล่วงหน้าเท่านั้น
+
+2. ความปลอดภัย และบุคคลภายนอก (Security & Visitors)
+• ห้ามบุคคลภายนอก (เพศชาย) ขึ้นบนห้องพักเด็ดขาด หากมีญาติหรือเพื่อนมาเยี่ยม ให้พบกันได้เฉพาะบริเวณด้านนอกอาคารหอพักหรือพื้นที่จัดไว้ให้เท่านั้น
+• เวลาเยี่ยมเยียน: สิ้นสุดเวลาเยี่ยมไม่เกิน 19:00 น. ของทุกวัน
+• การรักษาความปลอดภัย: ต้องล็อกประตูห้องพักทุกครั้งเมื่อเข้า-ออก หรือเข้านอน ห้ามให้กุญแจหรือคีย์การ์ดกับบุคคลอื่นยืมใช้เด็ดขาด
+
+3. ความประพฤติ และสุขอนามัย (Conduct & Hygiene)
+• สิ่งเสพติดและของมึนเมา: ห้ามพกพา เสพ หรือมีไว้ในครอบครองซึ่งบุหรี่ บุหรี่ไฟฟ้า สุรา สิ่งมึนเมา และยาเสพติดทุกชนิดภายในบริเวณหอพัก
+• สิ่งผิดกฎหมายและอาวุธ: ห้ามนำอาวุธ วัตถุระเบิด หรือสิ่งผิดกฎหมายทุกชนิดเข้ามาในหอพัก
+• ความสะอาด: รับผิดชอบความสะอาดภายในห้องพักของตนเอง และช่วยกันรักษาความสะอาดบริเวณพื้นที่ส่วนกลาง
+• การจัดการขยะ: นำขยะในห้องพักไปทิ้งในจุดที่หอพักกำหนดไว้ทุกวัน, ห้ามทิ้งเศษอาหารลงในท่อระบายน้ำทิ้ง, ห้ามทิ้งกระดาษชำระลงในชักโครก
+
+4. ทรัพย์สิน และการใช้พลังงาน (Facilities & Utilities)
+• การอนุรักษ์พลังงาน: ปิดไฟ แอร์ พัดลม และเครื่องใช้ไฟฟ้าทุกชนิดทันทีเมื่อออกจากห้องพัก
+• เครื่องใช้ไฟฟ้าที่ไม่อนุญาต: ห้ามใช้เครื่องใช้ไฟฟ้าประเภทให้ความร้อนสูงในห้องนอน เช่น เตาไฟฟ้า หม้อสุกี้ (ให้ใช้ในจุดที่จัดเตรียมไว้ให้เท่านั้น)
+• ห้ามประกอบอาหารภายในหอพัก และห้ามใช้เตาไฟฟ้า/เตาแก๊ส
+• ความเสียหาย: หากทรัพย์สินของหอพักชำรุดเสียหายจากการใช้งานผิดวิธี ผู้พักอาศัยต้องรับผิดชอบค่าใช้จ่ายในการซ่อมแซมหรือทดแทน
+
+5. ความสงบเรียบร้อยในยามวิกาล (Quiet Hours)
+• เวลาพักผ่อน: งดส่งเสียงดังหรือทำกิจกรรมที่รบกวนผู้อื่นตั้งแต่เวลา 22:00 น. เป็นต้นไป
+• การใช้เสียง: ควรใช้อุปกรณ์หูฟังหากต้องการฟังเพลง ดูซีรีส์ หรือเล่นเกมในช่วงเวลาดึก เพื่อไม่ให้เป็นการรบกวนเพื่อนร่วมห้องและห้องข้างเคียง
+
+6. การชำระค่าเช่า
+• ก่อนเข้าพักจะต้องทำสัญญาเช่าอย่างน้อย 1 ปี และเก็บเงินค่าเช่า + ค่ามัดจำล่วงหน้า 1 เดือน
+• การชำระค่าเช่า ไม่เกินวันที่ 5 ของเดือน โดยชำระเป็นการโอน / QR code เท่านั้น โดยจะแจ้งยอดบิลใน app / line ของหอพัก`;
+
+export const DEFAULT_DORM_VIOLATIONS = `บทลงโทษกรณีฝ่าฝืนกฎระเบียบ
+1. ตักเตือนด้วยวาจา: สำหรับการทำผิดครั้งแรก (เช่น ลืมปิดไฟ, กลับเข้าหอช้ากว่ากำหนดเล็กน้อยโดยไม่แจ้ง)
+2. ตักเตือนเป็นลายลักษณ์อักษร / แจ้งผู้ปกครอง: สำหรับการทำผิดซ้ำ หรือฝ่าฝืนกฎระดับปานกลาง
+3. พักการเข้าพัก / เชิญออกนอกหอพัก และยกเลิกสัญญา: สำหรับการทำผิดร้ายแรง เช่น เกี่ยวกับยาเสพติด, การนำเพศตรงข้ามขึ้นห้องพัก, หรือการทะเลาะวิวาท
+4. การค้างชำระเกินวันที่กำหนด จะต้องแจ้งผู้ปกครองให้รับทราบ เพื่อชำระให้เรียบร้อย ถ้าไม่มีการชำระจนถึงวันที่ 15 ของเดือน ให้ยกเลิกสัญญา เชิญออกจากหอพัก และถ้ามีการชำระล่าช้าติดต่อกันสองเดือน (เกินกว่าวันที่ 5) ให้ยกเลิกสัญญา เชิญออกจากหอพัก เช่นเดียวกัน`;
+
 const App = () => {
   // --- State Management ---
   const [user, setUser] = useState(null);
@@ -142,6 +180,11 @@ const App = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState(null);
   
+  // AI ID Card Scanner States
+  const [isScanningIdCard, setIsScanningIdCard] = useState<boolean>(false);
+  const [scanningTarget, setScanningTarget] = useState<'tenant' | 'parent'>('tenant');
+  const [scanStatusMessage, setScanStatusMessage] = useState<string>('');
+  
   // Building & Floor Tab Navigation States for 'rooms' tab
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [selectedFloor, setSelectedFloor] = useState<string>('');
@@ -158,9 +201,10 @@ const App = () => {
   const [tenantForm, setTenantForm] = useState({ 
     name: '', idCard: '', phone: '', parentName: '', parentPhone: '', address: '',
     contractId: '', deposit: '', initialTotal: '', dueDate: '5',
-    startDate: new Date().toISOString().split('T')[0], endDate: '',
-    rules: '1. ห้ามเสียงดังหลัง 22.00 น.\n2. ห้ามสูบบุหรี่ในห้องพัก\n3. ห้ามนำสัตว์เลี้ยงเข้าพัก',
-    violationDetails: 'หากทำผิดกฎเกิน 3 ครั้ง หรือค้างชำระค่าเช่าเกิน 15 วัน ทางหอพักขอสงวนสิทธิ์ยกเลิกสัญญาและยึดเงินมัดจำทันที',
+    startDate: new Date().toISOString().split('T')[0], 
+    endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
+    rules: DEFAULT_DORM_RULES,
+    violationDetails: DEFAULT_DORM_VIOLATIONS,
     idCardImage: null,
     tenantPassword: ''
   });
@@ -349,6 +393,111 @@ const App = () => {
     }
   };
 
+  const processIdCardWithAI = async (file: File, target: 'tenant' | 'parent') => {
+    setIsScanningIdCard(true);
+    setScanningTarget(target);
+    setScanStatusMessage('กำลังประมวลผลรูปภาพและอ่านข้อมูลด้วย AI...');
+
+    try {
+      // Compress/prepare image
+      const compressedDataUrl = await compressImage(file, 1.2) as string;
+      
+      // If scanning for tenant, also save this as the ID card photo copy
+      if (target === 'tenant') {
+        setTenantForm(prev => ({ ...prev, idCardImage: compressedDataUrl }));
+      }
+
+      // Extract base64 payload and mimeType
+      const match = compressedDataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+      if (!match) {
+        throw new Error('รูปแบบไฟล์รูปภาพไม่ถูกต้อง');
+      }
+      const mimeType = match[1];
+      const base64Data = match[2];
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('ไม่พบคีย์เชื่อมต่อ AI (GEMINI_API_KEY)');
+      }
+
+      setScanStatusMessage('AI กำลังถอดข้อมูลบัตรประชาชน (ชื่อ-นามสกุล, เลขบัตร, ที่อยู่)...');
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `คุณคือระบบ OCR และ AI อ่านบัตรประจำตัวประชาชนไทย (Thai National ID Card) แบบความแม่นยำสูง
+โปรดวิเคราะห์รูปภาพบัตรประชาชนนี้ และดึงข้อมูลต่อไปนี้ออกมาอย่างถูกต้อง:
+1. "name": ชื่อและนามสกุลภาษาไทยเต็ม เช่น "นาย สมชาย ใจดี" หรือ "น.ส. กานดา บุญรักษา" (ไม่ตัดคำนำหน้าออก)
+2. "idCard": เลขประจำตัวประชาชน 13 หลัก (เฉพาะตัวเลขติดกัน 13 หลัก เช่น "1234567890123")
+3. "address": ที่อยู่ตามบัตรประชาชนภาษาไทยแบบสมบูรณ์ เช่น "123 หมู่ 4 ต.ในเมือง อ.เมือง จ.ขอนแก่น"
+
+ส่งคำตอบกลับมาเฉพาะ JSON เท่านั้น ในโครงสร้างนี้:
+{
+  "name": "...",
+  "idCard": "...",
+  "address": "..."
+}
+หากข้อมูลส่วนใดมองไม่ชัดหรืออ่านไม่ได้ ให้ใส่เป็นสตริงว่าง ""`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: 'application/json'
+        }
+      });
+
+      const responseText = response.text || '{}';
+      let parsed: { name?: string; idCard?: string; address?: string } = {};
+      try {
+        parsed = JSON.parse(responseText.trim());
+      } catch (err) {
+        const cleaned = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+        parsed = JSON.parse(cleaned);
+      }
+
+      setTenantForm(prev => {
+        if (target === 'tenant') {
+          return {
+            ...prev,
+            name: parsed.name ? parsed.name.trim() : prev.name,
+            idCard: parsed.idCard ? parsed.idCard.trim().replace(/[^0-9]/g, '') : prev.idCard,
+            address: parsed.address ? parsed.address.trim() : prev.address
+          };
+        } else {
+          // target === 'parent'
+          return {
+            ...prev,
+            parentName: parsed.name ? parsed.name.trim() : prev.parentName,
+            address: parsed.address ? (prev.address ? prev.address : parsed.address.trim()) : prev.address
+          };
+        }
+      });
+
+      setScanStatusMessage('ดึงข้อมูลสำเร็จเรียบร้อย!');
+      setTimeout(() => {
+        setScanStatusMessage('');
+      }, 3000);
+    } catch (error: any) {
+      console.error('Scan ID Card Error:', error);
+      alert(`การสแกนบัตรประชาชนด้วย AI ขัดข้อง: ${error?.message || 'โปรดลองใหม่อีกครั้ง หรือถ่ายรูปให้ชัดเจนขึ้น'}`);
+    } finally {
+      setIsScanningIdCard(false);
+    }
+  };
+
   const handleSingleRoomImageUpload = async (e, roomId, building) => {
     const file = e.target.files[0];
     if (file) {
@@ -485,12 +634,67 @@ const App = () => {
     setTenantForm({ 
       name: '', idCard: '', phone: '', parentName: '', parentPhone: '', address: '',
       contractId: '', deposit: '', initialTotal: '', dueDate: '5', 
-      startDate: new Date().toISOString().split('T')[0], endDate: '',
-      rules: '1. ห้ามเสียงดังหลัง 22.00 น.\n2. ห้ามสูบบุหรี่ในห้องพัก\n3. ห้ามนำสัตว์เลี้ยงเข้าพัก',
-      violationDetails: 'หากทำผิดกฎเกิน 3 ครั้ง หรือค้างชำระค่าเช่าเกิน 15 วัน ทางหอพักขอสงวนสิทธิ์ยกเลิกสัญญาและยึดเงินมัดจำทันที',
+      startDate: new Date().toISOString().split('T')[0], 
+      endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
+      rules: DEFAULT_DORM_RULES,
+      violationDetails: DEFAULT_DORM_VIOLATIONS,
       idCardImage: null,
       tenantPassword: ''
     });
+  };
+
+  const openCreateContractModal = (room: any) => {
+    setSelectedRoom(room);
+    const currentYear = new Date().getFullYear();
+    const nextYearDate = new Date();
+    nextYearDate.setFullYear(currentYear + 1);
+    const monthStr = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    const today = new Date().toISOString().split('T')[0];
+    const oneYearLater = nextYearDate.toISOString().split('T')[0];
+    const roomPrice = Number(room.price) || 0;
+
+    setTenantForm({ 
+      name: room.bookingInfo?.name || '', 
+      idCard: '', 
+      phone: room.bookingInfo?.phone || '', 
+      parentName: '', 
+      parentPhone: '', 
+      address: '',
+      contractId: `CTR-${room.building}${room.id}-${currentYear.toString().slice(-2)}${monthStr}`, 
+      deposit: String(roomPrice), 
+      initialTotal: String(roomPrice * 2), 
+      dueDate: '5',
+      startDate: today, 
+      endDate: oneYearLater,
+      rules: DEFAULT_DORM_RULES,
+      violationDetails: DEFAULT_DORM_VIOLATIONS,
+      idCardImage: null,
+      tenantPassword: `${room.building}${room.id}888`
+    });
+    setIsTenantModalOpen(true);
+  };
+
+  const openEditTenantModal = (room: any) => {
+    setSelectedRoom(room);
+    setTenantForm({
+      name: room.tenant || '',
+      idCard: room.idCard || '',
+      phone: room.phone || '',
+      parentName: room.parentName || '',
+      parentPhone: room.parentPhone || '',
+      address: room.address || '',
+      contractId: room.contractId || '',
+      deposit: room.deposit || '',
+      initialTotal: room.initialTotal || '',
+      dueDate: room.dueDate || '5',
+      startDate: room.startDate || new Date().toISOString().split('T')[0],
+      endDate: room.endDate || '',
+      rules: room.rules || DEFAULT_DORM_RULES,
+      violationDetails: room.violationDetails || DEFAULT_DORM_VIOLATIONS,
+      idCardImage: room.idCardImage || null,
+      tenantPassword: room.tenantPassword || ''
+    });
+    setIsTenantModalOpen(true);
   };
 
   const handleRemoveTenant = async (room) => {
@@ -1457,15 +1661,15 @@ const App = () => {
 
                 <div className="space-y-6 mb-10">
                   <div>
-                    <h3 className="font-black text-gray-900 mb-2">ข้อตกลงและเงื่อนไขการเช่า</h3>
-                    <div className="bg-gray-50 p-4 rounded-xl whitespace-pre-line text-xs">
-                      {selectedContractRoom.rules || 'ไม่มีระบุ'}
+                    <h3 className="font-black text-gray-900 mb-2">ข้อตกลงและเงื่อนไขการเช่า (กฎระเบียบหอพัก)</h3>
+                    <div className="bg-gray-50 p-4 sm:p-5 rounded-xl whitespace-pre-line text-xs text-gray-800 leading-relaxed border border-gray-200">
+                      {selectedContractRoom.rules || DEFAULT_DORM_RULES}
                     </div>
                   </div>
                   <div>
-                    <h3 className="font-black text-red-600 mb-2">บทลงโทษและการระงับสัญญา</h3>
-                    <div className="bg-red-50 p-4 rounded-xl whitespace-pre-line text-xs text-red-900">
-                      {selectedContractRoom.violationDetails || 'ไม่มีระบุ'}
+                    <h3 className="font-black text-red-600 mb-2">บทลงโทษและการระงับสัญญา (กรณีฝ่าฝืน)</h3>
+                    <div className="bg-red-50 p-4 sm:p-5 rounded-xl whitespace-pre-line text-xs text-red-950 leading-relaxed border border-red-200">
+                      {selectedContractRoom.violationDetails || DEFAULT_DORM_VIOLATIONS}
                     </div>
                   </div>
                 </div>
@@ -1542,57 +1746,207 @@ const App = () => {
                 
                 {/* Section: ผู้เช่า */}
                 <div className="space-y-4">
-                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><User size={14} /> ข้อมูลผู้เช่า และเข้าสู่ระบบ</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="text" required className="w-full p-2.5 border rounded-xl" placeholder="ชื่อ-นามสกุล ผู้เช่า" value={tenantForm.name} onChange={e => setTenantForm({...tenantForm, name: e.target.value})} />
-                    <input type="text" required className="w-full p-2.5 border rounded-xl" placeholder="เลขบัตรประชาชนผู้เช่า" value={tenantForm.idCard} onChange={e => setTenantForm({...tenantForm, idCard: e.target.value})} />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2">
+                    <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                      <User size={14} className="text-blue-600" /> ข้อมูลผู้เช่า และเข้าสู่ระบบ
+                    </h3>
+                    
+                    {/* Camera / AI Scan Button for Tenant ID */}
+                    <div className="flex items-center gap-2">
+                      <label 
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                          isScanningIdCard && scanningTarget === 'tenant'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300 animate-pulse'
+                            : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white hover:shadow-md active:scale-95'
+                        }`}
+                        title="เปิดกล้องมือถือ/เลือกรูปบัตรประชาชนผู้เช่า ให้ AI ดึงชื่อ เลขบัตร และที่อยู่ให้อัตโนมัติ"
+                      >
+                        {isScanningIdCard && scanningTarget === 'tenant' ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            <span>AI กำลังอ่านบัตร...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Camera size={14} />
+                            <Sparkles size={12} className="text-yellow-300" />
+                            <span>สแกนบัตร ปชช. ผู้เช่า (Camera AI)</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={isScanningIdCard}
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              processIdCardWithAI(file, 'tenant');
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
-                  <input type="tel" required className="w-full p-2.5 border rounded-xl" placeholder="เบอร์โทรผู้เช่า" value={tenantForm.phone} onChange={e => setTenantForm({...tenantForm, phone: e.target.value})} />
+
+                  {isScanningIdCard && scanningTarget === 'tenant' && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3 text-xs text-blue-800 animate-pulse">
+                      <Loader2 size={18} className="animate-spin text-blue-600 shrink-0" />
+                      <div className="flex-1 font-medium">{scanStatusMessage || 'กำลังอ่านข้อมูลบัตรประชาชนด้วย AI...'}</div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 mb-1 block">ชื่อ-นามสกุล ผู้เช่า</label>
+                      <input type="text" required className="w-full p-2.5 border rounded-xl" placeholder="ชื่อ-นามสกุล ผู้เช่า" value={tenantForm.name} onChange={e => setTenantForm({...tenantForm, name: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 mb-1 block">เลขบัตรประชาชนผู้เช่า (13 หลัก)</label>
+                      <input type="text" required className="w-full p-2.5 border rounded-xl font-mono" placeholder="เลขบัตรประชาชนผู้เช่า 13 หลัก" value={tenantForm.idCard} onChange={e => setTenantForm({...tenantForm, idCard: e.target.value})} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 mb-1 block">เบอร์โทรศัพท์ผู้เช่า</label>
+                    <input type="tel" required className="w-full p-2.5 border rounded-xl" placeholder="เบอร์โทรผู้เช่า" value={tenantForm.phone} onChange={e => setTenantForm({...tenantForm, phone: e.target.value})} />
+                  </div>
                   <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mt-2">
                      <p className="text-xs font-bold text-blue-800 mb-2">ข้อมูลสำหรับผู้เช่าเข้าสู่ระบบ:</p>
                      <p className="text-sm mb-2">Username: <span className="font-bold text-blue-600">{selectedRoom?.building}{selectedRoom?.id}</span></p>
                      <input type="text" required className="w-full p-2.5 border rounded-xl" placeholder="รหัสผ่านเข้าสู่ระบบสำหรับห้องนี้" value={tenantForm.tenantPassword || ''} onChange={e => setTenantForm({...tenantForm, tenantPassword: e.target.value})} />
                   </div>
                   
-                  {/* ID Card Upload */}
-                  <div className="relative border-2 border-dashed rounded-xl p-4 bg-gray-50 flex items-center justify-center gap-3">
-                    {tenantForm.idCardImage ? (
-                      <div className="flex flex-col items-center gap-3 w-full">
-                        <img src={tenantForm.idCardImage} className="w-full max-h-48 object-contain rounded border shadow-sm" alt="ID Card" />
-                        <div className="flex items-center gap-2">
-                           <span className="text-xs font-bold text-green-600">อัปโหลดสำเนาบัตรประชาชนแล้ว</span>
-                           <button type="button" onClick={() => setTenantForm({...tenantForm, idCardImage: null})} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16} /></button>
+                  {/* ID Card Upload / Camera Photo Preview */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center justify-between">
+                      <span>สำเนาบัตรประชาชนผู้เช่า (สำหรับแนบท้ายสัญญา)</span>
+                      {tenantForm.idCardImage && <span className="text-emerald-600 font-bold lowercase flex items-center gap-1"><CheckCircle size={11} /> มีภาพบัตรแล้ว</span>}
+                    </label>
+                    <div className="relative border-2 border-dashed rounded-xl p-4 bg-gray-50 flex items-center justify-center gap-3">
+                      {tenantForm.idCardImage ? (
+                        <div className="flex flex-col items-center gap-3 w-full">
+                          <img src={tenantForm.idCardImage} className="w-full max-h-48 object-contain rounded border shadow-sm" alt="ID Card" />
+                          <div className="flex items-center gap-2 flex-wrap justify-center">
+                             <span className="text-xs font-bold text-green-600 flex items-center gap-1"><CheckCircle size={14} /> บันทึกสำเนาบัตรประชาชนแล้ว</span>
+                             <button type="button" onClick={() => setTenantForm({...tenantForm, idCardImage: null})} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg border border-red-200 text-xs font-bold flex items-center gap-1 transition-colors"><Trash2 size={13} /> ลบรูป</button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-2 text-gray-400 cursor-pointer py-4">
-                        <Upload size={32} />
-                        <span className="text-xs font-bold uppercase">คลิกเพื่ออัปโหลดสำเนาบัตรประชาชน</span>
-                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, 'idCard')} />
-                      </div>
-                    )}
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-gray-400 cursor-pointer py-4">
+                          <Camera size={32} className="text-blue-500" />
+                          <span className="text-xs font-bold uppercase text-gray-600">ถ่ายรูปบัตร / อัปโหลดสำเนาบัตรประชาชน</span>
+                          <span className="text-[11px] text-gray-400">รองรับทั้งการถ่ายด้วยกล้องมือถือและการเลือกรูปภาพ</span>
+                          <input type="file" accept="image/*" capture="environment" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              processIdCardWithAI(file, 'tenant');
+                              e.target.value = '';
+                            }
+                          }} />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
+                {/* Section: ผู้ปกครอง & ที่อยู่ */}
                 <div className="space-y-4">
-                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><UserCheck size={14} /> ข้อมูลผู้ปกครอง & ที่อยู่</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="text" className="w-full p-2.5 border rounded-xl" placeholder="ชื่อผู้ปกครอง" value={tenantForm.parentName} onChange={e => setTenantForm({...tenantForm, parentName: e.target.value})} />
-                    <input type="tel" className="w-full p-2.5 border rounded-xl" placeholder="เบอร์โทรผู้ปกครอง" value={tenantForm.parentPhone} onChange={e => setTenantForm({...tenantForm, parentPhone: e.target.value})} />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2">
+                    <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                      <UserCheck size={14} className="text-emerald-600" /> ข้อมูลผู้ปกครอง & ที่อยู่
+                    </h3>
+                    
+                    {/* Camera / AI Scan Button for Parent ID */}
+                    <div className="flex items-center gap-2">
+                      <label 
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                          isScanningIdCard && scanningTarget === 'parent'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300 animate-pulse'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:shadow-md active:scale-95'
+                        }`}
+                        title="เปิดกล้องมือถือ/เลือกรูปบัตรประชาชนผู้ปกครอง ให้ AI ดึงชื่อ และที่อยู่ให้อัตโนมัติ"
+                      >
+                        {isScanningIdCard && scanningTarget === 'parent' ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            <span>AI กำลังอ่านบัตร...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Camera size={14} />
+                            <Sparkles size={12} className="text-yellow-300" />
+                            <span>สแกนบัตร ปชช. ผู้ปกครอง (Camera AI)</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={isScanningIdCard}
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              processIdCardWithAI(file, 'parent');
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
-                  <textarea className="w-full p-2.5 border rounded-xl h-20" placeholder="ที่อยู่ตามทะเบียนบ้าน / ที่อยู่ติดต่อ" value={tenantForm.address} onChange={e => setTenantForm({...tenantForm, address: e.target.value})} />
-                </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><CreditCard size={14} /> รายละเอียดการเงิน</h3>
+                  {isScanningIdCard && scanningTarget === 'parent' && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 text-xs text-emerald-800 animate-pulse">
+                      <Loader2 size={18} className="animate-spin text-emerald-600 shrink-0" />
+                      <div className="flex-1 font-medium">{scanStatusMessage || 'กำลังอ่านข้อมูลบัตรประชาชนผู้ปกครองด้วย AI...'}</div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">เลขที่สัญญา</label>
-                      <input type="text" required className="w-full p-2.5 border rounded-xl" value={tenantForm.contractId} onChange={e => setTenantForm({...tenantForm, contractId: e.target.value})} />
+                      <label className="text-[10px] font-bold text-gray-500 mb-1 block">ชื่อผู้ปกครอง</label>
+                      <input type="text" className="w-full p-2.5 border rounded-xl" placeholder="ชื่อ-นามสกุล ผู้ปกครอง" value={tenantForm.parentName} onChange={e => setTenantForm({...tenantForm, parentName: e.target.value})} />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">วันกำหนดชำระ</label>
-                      <input type="number" min="1" max="31" className="w-full p-2.5 border rounded-xl" value={tenantForm.dueDate} onChange={e => setTenantForm({...tenantForm, dueDate: e.target.value})} />
+                      <label className="text-[10px] font-bold text-gray-500 mb-1 block">เบอร์โทรผู้ปกครอง</label>
+                      <input type="tel" className="w-full p-2.5 border rounded-xl" placeholder="เบอร์โทรผู้ปกครอง" value={tenantForm.parentPhone} onChange={e => setTenantForm({...tenantForm, parentPhone: e.target.value})} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 mb-1 block">ที่อยู่ตามทะเบียนบ้าน / ที่อยู่ติดต่อ</label>
+                    <textarea className="w-full p-2.5 border rounded-xl h-20 text-xs" placeholder="ที่อยู่ตามทะเบียนบ้าน / ที่อยู่ติดต่อ (AI จะเติมให้อัตโนมัติเมื่อสแกนบัตร)" value={tenantForm.address} onChange={e => setTenantForm({...tenantForm, address: e.target.value})} />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><CreditCard size={14} /> รายละเอียดสัญญา & การเงิน</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">เลขที่สัญญา</label>
+                      <input type="text" required className="w-full p-2.5 border rounded-xl font-mono text-sm" value={tenantForm.contractId} onChange={e => setTenantForm({...tenantForm, contractId: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">วันกำหนดชำระรายเดือน (ทุกวันที่)</label>
+                      <input type="number" min="1" max="31" className="w-full p-2.5 border rounded-xl text-sm" value={tenantForm.dueDate} onChange={e => setTenantForm({...tenantForm, dueDate: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">เงินมัดจำล่วงหน้า (บาท)</label>
+                      <input type="number" className="w-full p-2.5 border rounded-xl text-sm" placeholder="เงินมัดจำ..." value={tenantForm.deposit} onChange={e => setTenantForm({...tenantForm, deposit: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">ยอดเงินรวมแรกเข้า (บาท)</label>
+                      <input type="number" className="w-full p-2.5 border rounded-xl text-sm" placeholder="ค่าเช่า + มัดจำ..." value={tenantForm.initialTotal} onChange={e => setTenantForm({...tenantForm, initialTotal: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">วันที่เริ่มสัญญา</label>
+                      <input type="date" required className="w-full p-2.5 border rounded-xl text-sm" value={tenantForm.startDate} onChange={e => setTenantForm({...tenantForm, startDate: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 mb-1 block">วันสิ้นสุดสัญญา (สัญญาอย่างน้อย 1 ปี)</label>
+                      <input type="date" className="w-full p-2.5 border rounded-xl text-sm" value={tenantForm.endDate} onChange={e => setTenantForm({...tenantForm, endDate: e.target.value})} />
                     </div>
                   </div>
                 </div>
@@ -1602,20 +1956,42 @@ const App = () => {
                   <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><ClipboardList size={14} /> ข้อตกลง เงื่อนไข และบทลงโทษเพิ่มเติม</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="text-xs font-bold text-gray-600 mb-1 block">ข้อตกลงและเงื่อนไขการเช่า (กฎระเบียบหอพัก)</label>
+                      <div className="flex justify-between items-center mb-1.5 flex-wrap gap-1">
+                        <label className="text-xs font-bold text-gray-700">ข้อตกลงและเงื่อนไขการเช่า (กฎระเบียบหอพัก)</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setTenantForm({...tenantForm, rules: DEFAULT_DORM_RULES})}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 transition-colors"
+                          title="ดึงกฎระเบียบมาตรฐานของหอพักเข้ามาใส่ใหม่อัตโนมัติ"
+                        >
+                          🔄 โหลดกฎระเบียบมาตรฐาน
+                        </button>
+                      </div>
                       <textarea 
                         required
-                        className="w-full p-2.5 border rounded-xl h-28 text-xs font-medium text-gray-700 bg-white shadow-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                        rows={11}
+                        className="w-full p-3 border rounded-xl text-xs font-medium text-gray-700 bg-white shadow-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden leading-relaxed"
                         placeholder="ระบุกฎระเบียบและข้อตกลงการเช่า..."
                         value={tenantForm.rules}
                         onChange={e => setTenantForm({...tenantForm, rules: e.target.value})}
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-gray-600 mb-1 block">บทลงโทษและการระงับสัญญา (กรณีฝ่าฝืน)</label>
+                      <div className="flex justify-between items-center mb-1.5 flex-wrap gap-1">
+                        <label className="text-xs font-bold text-gray-700">บทลงโทษและการระงับสัญญา (กรณีฝ่าฝืน)</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setTenantForm({...tenantForm, violationDetails: DEFAULT_DORM_VIOLATIONS})}
+                          className="text-[11px] font-bold text-red-600 hover:text-red-800 hover:underline bg-red-50 px-2.5 py-1 rounded-lg border border-red-200 transition-colors"
+                          title="ดึงบทลงโทษมาตรฐานเข้ามาใส่ใหม่อัตโนมัติ"
+                        >
+                          🔄 โหลดบทลงโทษมาตรฐาน
+                        </button>
+                      </div>
                       <textarea 
                         required
-                        className="w-full p-2.5 border rounded-xl h-24 text-xs font-medium text-gray-700 bg-white shadow-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                        rows={6}
+                        className="w-full p-3 border rounded-xl text-xs font-medium text-gray-700 bg-white shadow-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden leading-relaxed"
                         placeholder="ระบุเงื่อนไขการระงับสัญญาและบทลงโทษ..."
                         value={tenantForm.violationDetails}
                         onChange={e => setTenantForm({...tenantForm, violationDetails: e.target.value})}
@@ -1984,39 +2360,18 @@ const App = () => {
                                   {authRole === 'admin' ? (
                                     <>
                                       {room.status === 'available' && (
-                                        <button onClick={() => { setSelectedRoom(room); setIsTenantModalOpen(true); }} className="text-blue-600 font-bold text-xs bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 hover:bg-blue-100 shadow-xs">ทำสัญญา</button>
+                                        <button onClick={() => openCreateContractModal(room)} className="text-blue-600 font-bold text-xs bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 hover:bg-blue-100 shadow-xs">ทำสัญญา</button>
                                       )}
                                       {room.status === 'pending_review' && (
                                         <button onClick={() => { setSelectedRoom(room); setIsReviewBookingModalOpen(true); }} className="text-orange-600 font-bold text-xs bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-100 hover:bg-orange-100 shadow-xs flex items-center gap-1"><Search size={13} /> ตรวจสอบ</button>
                                       )}
                                       {room.status === 'reserved' && (
-                                        <button onClick={() => { setSelectedRoom(room); setTenantForm({...tenantForm, name: room.bookingInfo?.name || '', phone: room.bookingInfo?.phone || ''}); setIsTenantModalOpen(true); }} className="text-blue-600 font-bold text-xs bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 hover:bg-blue-100 shadow-xs flex items-center gap-1"><UserPlus size={13} /> ทำสัญญาเช่า</button>
+                                        <button onClick={() => openCreateContractModal(room)} className="text-blue-600 font-bold text-xs bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 hover:bg-blue-100 shadow-xs flex items-center gap-1"><UserPlus size={13} /> ทำสัญญาเช่า</button>
                                       )}
                                       {room.status === 'occupied' && (
                                         <>
                                           <button 
-                                            onClick={() => { 
-                                              setSelectedRoom(room); 
-                                              setTenantForm({
-                                                name: room.tenant || '',
-                                                idCard: room.idCard || '',
-                                                phone: room.phone || '',
-                                                parentName: room.parentName || '',
-                                                parentPhone: room.parentPhone || '',
-                                                address: room.address || '',
-                                                contractId: room.contractId || '',
-                                                deposit: room.deposit || '',
-                                                initialTotal: room.initialTotal || '',
-                                                dueDate: room.dueDate || '5',
-                                                startDate: room.startDate || new Date().toISOString().split('T')[0],
-                                                endDate: room.endDate || '',
-                                                rules: room.rules || '1. ห้ามเสียงดังหลัง 22.00 น.\n2. ห้ามสูบบุหรี่ในห้องพัก\n3. ห้ามนำสัตว์เลี้ยงเข้าพัก',
-                                                violationDetails: room.violationDetails || 'หากทำผิดกฎเกิน 3 ครั้ง หรือค้างชำระค่าเช่าเกิน 15 วัน ทางหอพักขอสงวนสิทธิ์ยกเลิกสัญญาและยึดเงินมัดจำทันที',
-                                                idCardImage: room.idCardImage || null,
-                                                tenantPassword: room.tenantPassword || ''
-                                              }); 
-                                              setIsTenantModalOpen(true); 
-                                            }} 
+                                            onClick={() => openEditTenantModal(room)} 
                                             className="text-blue-600 font-bold text-xs bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-100 hover:bg-blue-100 shadow-xs flex items-center gap-1"
                                             title="แก้ไขข้อมูลผู้เช่าและรหัสผ่าน"
                                           >
@@ -2120,39 +2475,18 @@ const App = () => {
                               {authRole === 'admin' ? (
                                 <>
                                   {room.status === 'available' && (
-                                    <button onClick={() => { setSelectedRoom(room); setIsTenantModalOpen(true); }} className="text-blue-600 font-bold text-[11px] bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100">ทำสัญญา</button>
+                                    <button onClick={() => openCreateContractModal(room)} className="text-blue-600 font-bold text-[11px] bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100">ทำสัญญา</button>
                                   )}
                                   {room.status === 'pending_review' && (
                                     <button onClick={() => { setSelectedRoom(room); setIsReviewBookingModalOpen(true); }} className="text-orange-600 font-bold text-[11px] bg-orange-50 px-2.5 py-1.5 rounded-lg border border-orange-100 hover:bg-orange-100 flex items-center gap-1"><Search size={12} /> ตรวจสอบ</button>
                                   )}
                                   {room.status === 'reserved' && (
-                                    <button onClick={() => { setSelectedRoom(room); setTenantForm({...tenantForm, name: room.bookingInfo?.name || '', phone: room.bookingInfo?.phone || ''}); setIsTenantModalOpen(true); }} className="text-blue-600 font-bold text-[11px] bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 flex items-center gap-1"><UserPlus size={12} /> ทำสัญญา</button>
+                                    <button onClick={() => openCreateContractModal(room)} className="text-blue-600 font-bold text-[11px] bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 flex items-center gap-1"><UserPlus size={12} /> ทำสัญญา</button>
                                   )}
                                   {room.status === 'occupied' && (
                                     <>
                                       <button 
-                                        onClick={() => { 
-                                          setSelectedRoom(room); 
-                                          setTenantForm({
-                                            name: room.tenant || '',
-                                            idCard: room.idCard || '',
-                                            phone: room.phone || '',
-                                            parentName: room.parentName || '',
-                                            parentPhone: room.parentPhone || '',
-                                            address: room.address || '',
-                                            contractId: room.contractId || '',
-                                            deposit: room.deposit || '',
-                                            initialTotal: room.initialTotal || '',
-                                            dueDate: room.dueDate || '5',
-                                            startDate: room.startDate || new Date().toISOString().split('T')[0],
-                                            endDate: room.endDate || '',
-                                            rules: room.rules || '1. ห้ามเสียงดังหลัง 22.00 น.\n2. ห้ามสูบบุหรี่ในห้องพัก\n3. ห้ามนำสัตว์เลี้ยงเข้าพัก',
-                                            violationDetails: room.violationDetails || 'หากทำผิดกฎเกิน 3 ครั้ง หรือค้างชำระค่าเช่าเกิน 15 วัน ทางหอพักขอสงวนสิทธิ์ยกเลิกสัญญาและยึดเงินมัดจำทันที',
-                                            idCardImage: room.idCardImage || null,
-                                            tenantPassword: room.tenantPassword || ''
-                                          }); 
-                                          setIsTenantModalOpen(true); 
-                                        }} 
+                                        onClick={() => openEditTenantModal(room)} 
                                         className="text-blue-600 font-bold text-[11px] bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 flex items-center gap-1"
                                         title="แก้ไขข้อมูลผู้เช่าและรหัสผ่าน"
                                       >
@@ -2957,8 +3291,18 @@ const App = () => {
                     </div>
                     
                     <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-4">
-                        <h3 className="font-bold flex items-center gap-2 text-red-600 border-b pb-4"><AlertCircle size={20} /> กฎระเบียบหอพัก</h3>
-                        <p className="text-sm whitespace-pre-line text-gray-700">{loggedInRoom.rules}</p>
+                        <h3 className="font-bold flex items-center gap-2 text-red-600 border-b pb-4"><AlertCircle size={20} /> กฎระเบียบและข้อตกลงหอพัก</h3>
+                        <div className="text-xs sm:text-sm whitespace-pre-line text-gray-700 leading-relaxed max-h-96 overflow-y-auto pr-1">
+                          {loggedInRoom.rules || DEFAULT_DORM_RULES}
+                        </div>
+                        {Boolean(loggedInRoom.violationDetails || DEFAULT_DORM_VIOLATIONS) && (
+                          <div className="mt-4 pt-4 border-t border-gray-100">
+                            <h4 className="font-bold text-xs text-red-600 mb-2">บทลงโทษกรณีฝ่าฝืน:</h4>
+                            <div className="text-xs whitespace-pre-line text-red-900 bg-red-50 p-3 rounded-xl border border-red-200">
+                              {loggedInRoom.violationDetails || DEFAULT_DORM_VIOLATIONS}
+                            </div>
+                          </div>
+                        )}
                     </div>
                 </div>
             </div>
