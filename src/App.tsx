@@ -324,6 +324,24 @@ const App = () => {
     };
   }, []);
 
+  // Dynamic Browser Tab Title and Favicon based on Dorm Info & Logo
+  useEffect(() => {
+    if (billConfig.dormName) {
+      document.title = billConfig.slogan 
+        ? `${billConfig.dormName} - ${billConfig.slogan}` 
+        : billConfig.dormName;
+    }
+    if (billConfig.logoUrl) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'shortcut icon';
+        document.head.appendChild(link);
+      }
+      link.href = billConfig.logoUrl;
+    }
+  }, [billConfig.dormName, billConfig.slogan, billConfig.logoUrl]);
+
   // --- Real-time Data Sync Effect ---
   useEffect(() => {
     const publicPath = (coll) => collection(db, 'artifacts', appId, 'public', 'data', coll);
@@ -1078,9 +1096,20 @@ const App = () => {
       <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-6 bg-gradient-to-br from-gray-100 via-gray-50 to-blue-50/30 font-sans">
         <div className="bg-white p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-3xl shadow-xl w-full max-w-sm sm:max-w-md border border-gray-100">
           <div className="text-center mb-6 sm:mb-8">
-            <div className="bg-blue-600 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 text-white shadow-lg shadow-blue-500/25">
-              <Building2 size={28} className="sm:w-8 sm:h-8" />
-            </div>
+            {billConfig.logoUrl ? (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-white shadow-lg shadow-blue-500/15 border-2 border-gray-100 p-1.5 overflow-hidden">
+                <img 
+                  src={billConfig.logoUrl} 
+                  alt={billConfig.dormName || 'Logo'} 
+                  className="w-full h-full object-contain rounded-xl"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            ) : (
+              <div className="bg-blue-600 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 text-white shadow-lg shadow-blue-500/25">
+                <Building2 size={28} className="sm:w-8 sm:h-8" />
+              </div>
+            )}
             <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">{billConfig.dormName || 'DormManager'}</h1>
             {billConfig.slogan && (
               <p className="text-xs sm:text-sm text-blue-600 font-semibold mt-1 italic tracking-tight">"{billConfig.slogan}"</p>
@@ -1164,9 +1193,20 @@ const App = () => {
       {/* Mobile Top Header */}
       <div className="lg:hidden flex items-center justify-between p-3.5 sm:p-4 bg-gray-900 text-white shadow-md z-30 shrink-0 print:hidden select-none border-b border-gray-800">
         <div className="flex items-center space-x-2.5 min-w-0">
-          <div className="bg-blue-600 p-2 rounded-xl text-white shadow-xs shrink-0">
-            <Home size={18} />
-          </div>
+          {billConfig.logoUrl ? (
+            <div className="w-10 h-10 rounded-xl bg-white p-1 shadow-xs border border-gray-700/60 shrink-0 flex items-center justify-center overflow-hidden">
+              <img 
+                src={billConfig.logoUrl} 
+                alt="Logo" 
+                className="w-full h-full object-contain rounded-lg" 
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          ) : (
+            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-xs shrink-0">
+              <Home size={18} />
+            </div>
+          )}
           <div className="min-w-0">
             <span className="text-base font-black tracking-tight text-white block leading-tight truncate">
               {billConfig.dormName || 'DormManager'}
@@ -1208,9 +1248,20 @@ const App = () => {
         {/* Menu Header with Dorm Branding & Close Button on Mobile */}
         <div className="flex items-center justify-between px-1 py-2 lg:py-5 mb-2 lg:mb-4 border-b border-gray-800 lg:border-none shrink-0">
           <div className="flex items-center space-x-2.5 min-w-0">
-            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-md shadow-blue-500/20 shrink-0">
-              <Home size={20} />
-            </div>
+            {billConfig.logoUrl ? (
+              <div className="w-10 h-10 lg:w-11 lg:h-11 rounded-xl bg-white p-1 shadow-md shadow-blue-500/20 border border-gray-700/60 shrink-0 flex items-center justify-center overflow-hidden">
+                <img 
+                  src={billConfig.logoUrl} 
+                  alt="Logo" 
+                  className="w-full h-full object-contain rounded-lg" 
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            ) : (
+              <div className="bg-blue-600 p-2 rounded-xl text-white shadow-md shadow-blue-500/20 shrink-0">
+                <Home size={20} />
+              </div>
+            )}
             <div className="min-w-0">
               <span className="text-base lg:text-lg font-black tracking-tight text-white block leading-tight truncate">
                 {billConfig.dormName || 'DormManager'}
@@ -3413,13 +3464,24 @@ const App = () => {
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 flex items-center gap-1">
                       <Sparkles size={12} /> ตัวอย่างการแสดงผลชื่อ & สโลแกนหอพัก
                     </span>
-                    <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-2xs">
-                      <h4 className="text-base font-black text-gray-900 leading-tight">{billConfig.dormName || 'ชื่อหอพัก'}</h4>
-                      {billConfig.slogan ? (
-                        <p className="text-xs font-semibold text-blue-600 italic mt-0.5">"{billConfig.slogan}"</p>
+                    <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-2xs flex items-center gap-3">
+                      {billConfig.logoUrl ? (
+                        <div className="w-12 h-12 rounded-xl border border-gray-100 p-1 bg-white shrink-0 overflow-hidden flex items-center justify-center shadow-xs">
+                          <img src={billConfig.logoUrl} className="w-full h-full object-contain rounded-lg" alt="Logo" referrerPolicy="no-referrer" />
+                        </div>
                       ) : (
-                        <p className="text-xs text-gray-400 italic mt-0.5">(ยังไม่ได้ระบุสโลแกน)</p>
+                        <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 text-blue-600 shrink-0 flex items-center justify-center">
+                          <Building2 size={24} />
+                        </div>
                       )}
+                      <div className="min-w-0">
+                        <h4 className="text-base font-black text-gray-900 leading-tight truncate">{billConfig.dormName || 'ชื่อหอพัก'}</h4>
+                        {billConfig.slogan ? (
+                          <p className="text-xs font-semibold text-blue-600 italic mt-0.5 truncate">"{billConfig.slogan}"</p>
+                        ) : (
+                          <p className="text-xs text-gray-400 italic mt-0.5">(ยังไม่ได้ระบุสโลแกน)</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -4179,14 +4241,21 @@ const App = () => {
         {/* --- Tenant Views --- */}
         {activeTab === 'tenant_dashboard' && loggedInRoom && (
             <div className="space-y-4 sm:space-y-6">
-                <div className="bg-white p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl border shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div>
+                <div className="bg-white p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl border shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5 sm:gap-4">
+                      {billConfig.logoUrl ? (
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white border border-gray-100 p-1 shadow-xs flex items-center justify-center shrink-0 overflow-hidden">
+                          <img src={billConfig.logoUrl} alt="Logo" className="w-full h-full object-contain rounded-xl" referrerPolicy="no-referrer" />
+                        </div>
+                      ) : null}
+                      <div>
                         <h2 className="text-xl sm:text-2xl md:text-3xl font-black mb-1">ยินดีต้อนรับ, {loggedInRoom.tenant}</h2>
                         <p className="text-xs sm:text-sm font-bold text-gray-700">{billConfig.dormName}</p>
                         {billConfig.slogan && (
                           <p className="text-xs font-semibold text-blue-600 italic mb-1.5">"{billConfig.slogan}"</p>
                         )}
                         <p className="text-gray-500 flex items-center gap-1.5 text-xs sm:text-sm"><Building2 size={16} /> ห้อง {loggedInRoom.id} (อาคาร {loggedInRoom.building})</p>
+                      </div>
                     </div>
                 </div>
 
