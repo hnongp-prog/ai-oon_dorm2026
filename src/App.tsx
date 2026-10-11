@@ -6,7 +6,7 @@ import {
   Calculator, Clock, CheckCircle, Receipt, Wallet, Upload, Eye, Settings, 
   QrCode, MapPin, TrendingUp, Calendar, Camera, ClipboardList, User, FileSearch, 
   AlertTriangle, Gavel, Lock, BadgeCheck, History, Send, ImagePlus, Menu, Key, ChevronRight,
-  Sparkles, Loader2
+  Sparkles, Loader2, Filter, Check, Quote
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 
@@ -69,44 +69,71 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-const compressImage = (file, maxSizeMB = 1) => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
+export const getImageSizeKB = (dataUrl?: string | null): number => {
+  if (!dataUrl || typeof dataUrl !== 'string') return 0;
+  const commaIdx = dataUrl.indexOf(',');
+  const base64Str = commaIdx !== -1 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  return Math.round((base64Str.length * 0.75) / 1024);
+};
+
+const compressImage = (input: File | Blob | string, maxSizeMB = 1, maxDim = 1200): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const processImage = (src: string) => {
       const img = new Image();
-      img.src = event.target?.result as string;
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-        const maxDim = 1200;
         
         if (width > height && width > maxDim) {
-          height *= maxDim / width;
+          height = Math.round(height * (maxDim / width));
           width = maxDim;
         } else if (height > maxDim) {
-          width *= maxDim / height;
+          width = Math.round(width * (maxDim / height));
           height = maxDim;
         }
 
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(src);
+          return;
+        }
         ctx.drawImage(img, 0, 0, width, height);
 
-        let quality = 0.9;
+        let quality = 0.85;
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-        while (dataUrl.length * 0.75 > maxSizeMB * 1024 * 1024 && quality > 0.1) {
+        while (dataUrl.length * 0.75 > maxSizeMB * 1024 * 1024 && quality > 0.15) {
           quality -= 0.1;
           dataUrl = canvas.toDataURL('image/jpeg', quality);
         }
         resolve(dataUrl);
       };
+      img.onerror = () => resolve(src);
+      img.src = src;
     };
+
+    if (typeof input === 'string') {
+      processImage(input);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          processImage(result);
+        } else {
+          resolve('');
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.readAsDataURL(input);
+    }
   });
 };
+
 
 export const DEFAULT_DORM_RULES = `1. เวลาเข้า-ออก และการกลับหอพัก (Curfew & Attendance)
 • เวลาเข้าหอพักปกติ: วันจันทร์ - พฤหัสบดี ต้องกลับเข้าหอพักภายในเวลา 20:00 น. / วันศุกร์ - อาทิตย์ และวันหยุดนักขัตฤกษ์ ภายในเวลา 21:00 น.
@@ -158,6 +185,7 @@ const App = () => {
   const [maintenance, setMaintenance] = useState([]);
   const [billConfig, setBillConfig] = useState({
     dormName: 'DormManager Residence',
+    slogan: 'อบอุ่น ปลอดภัย สะดวกสบาย เหมือนบ้านคุณ',
     address: '123/45 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110',
     phone: '02-123-4567',
     taxId: '0-1234-56789-01-2',
@@ -194,6 +222,10 @@ const App = () => {
   const [billingStatusFilter, setBillingStatusFilter] = useState<string>('all');
   const [billingBuildingFilter, setBillingBuildingFilter] = useState<string>('all');
   
+  // Contract Tab Filter States
+  const [contractSearch, setContractSearch] = useState<string>('');
+  const [contractBuildingFilter, setContractBuildingFilter] = useState<string>('all');
+  
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [selectedBill, setSelectedBill] = useState(null);
   const [selectedContractRoom, setSelectedContractRoom] = useState(null);
@@ -217,6 +249,9 @@ const App = () => {
   const [newMeter, setNewMeter] = useState({ roomId: '', prevElec: 0, currElec: '', prevWater: 0, currWater: '' });
   const [newExpense, setNewExpense] = useState({ title: '', amount: '', category: 'General', date: new Date().toISOString().split('T')[0], note: '' });
   const [newMaintenance, setNewMaintenance] = useState({ roomId: '', issue: '', image: null });
+  const [maintenanceFilter, setMaintenanceFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
+  const [maintenanceSearch, setMaintenanceSearch] = useState<string>('');
+  const [editingMaintenanceNote, setEditingMaintenanceNote] = useState<{ id: number | null, adminNote: string, cost: string }>({ id: null, adminNote: '', cost: '' });
 
   // Auth Role States
   const [authRole, setAuthRole] = useState(null); // 'admin' | 'tenant' | 'guest' | null
@@ -314,7 +349,7 @@ const App = () => {
     }, (err) => console.error(err));
 
     const unsubConfig = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
-      if (docSnap.exists()) setBillConfig(docSnap.data());
+      if (docSnap.exists()) setBillConfig(prev => ({ ...prev, ...docSnap.data() }));
     }, (err) => console.error(err));
 
     const unsubRates = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'rates'), (docSnap) => {
@@ -372,9 +407,16 @@ const App = () => {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'rates'), newRates);
   };
 
-  const handleFileChange = (e, field) => {
-    const file = e.target.files[0];
+  const handleFileChange = async (e, field) => {
+    const file = e.target.files?.[0];
     if (file) {
+      if (field === 'idCard') {
+        // บีบอัดสำเนาบัตรประชาชนให้มีขนาดกะทัดรัด คมชัดสูง (~100-200 KB) เพื่อประหยัดพื้นที่จัดเก็บ
+        const compressed = await compressImage(file, 0.25, 1000);
+        setTenantForm(prev => ({ ...prev, idCardImage: compressed }));
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         if (field === 'room') {
@@ -383,8 +425,6 @@ const App = () => {
           handleUpdateConfig({ ...billConfig, logoUrl: reader.result });
         } else if (field === 'qr') {
           handleUpdateConfig({ ...billConfig, qrCodeUrl: reader.result });
-        } else if (field === 'idCard') {
-          setTenantForm({ ...tenantForm, idCardImage: reader.result });
         } else if (field === 'slip') {
           setBookingForm({ ...bookingForm, slipImage: reader.result });
         }
@@ -396,11 +436,11 @@ const App = () => {
   const processIdCardWithAI = async (file: File, target: 'tenant' | 'parent') => {
     setIsScanningIdCard(true);
     setScanningTarget(target);
-    setScanStatusMessage('กำลังประมวลผลรูปภาพและอ่านข้อมูลด้วย AI...');
+    setScanStatusMessage('กำลังลดขนาดและปรับความคมชัดของภาพบัตรประชาชน...');
 
     try {
-      // Compress/prepare image
-      const compressedDataUrl = await compressImage(file, 1.2) as string;
+      // บีบอัดภาพบัตรประชาชนให้อยู่ในขนาดเหมาะสม (~120-250 KB, คมชัด 1000px) เพื่อประหยัดพื้นที่และอ่านได้รวดเร็ว
+      const compressedDataUrl = await compressImage(file, 0.25, 1000) as string;
       
       // If scanning for tenant, also save this as the ID card photo copy
       if (target === 'tenant') {
@@ -896,10 +936,36 @@ const App = () => {
     );
   };
 
+  const updateMaintenanceStatus = async (item, newStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maintenance', item.id.toString()), {
+        status: newStatus,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error updating status: ", err);
+      alert('เกิดข้อผิดพลาดในการเปลี่ยนสถานะ: ' + (err as Error).message);
+    }
+  };
+
   const toggleMaintenanceStatus = async (item) => {
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maintenance', item.id.toString()), {
-      status: item.status === 'pending' ? 'completed' : 'pending' // fixed logic bug here as per user code
-    });
+    const nextStatus = item.status === 'completed' ? 'pending' : 'completed';
+    await updateMaintenanceStatus(item, nextStatus);
+  };
+
+  const handleSaveMaintenanceNote = async (item) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maintenance', item.id.toString()), {
+        adminNote: editingMaintenanceNote.adminNote,
+        cost: editingMaintenanceNote.cost ? parseFloat(editingMaintenanceNote.cost) : 0,
+        updatedAt: new Date().toISOString()
+      });
+      setEditingMaintenanceNote({ id: null, adminNote: '', cost: '' });
+      alert('บันทึกหมายเหตุการซ่อมเรียบร้อยแล้ว');
+    } catch (err) {
+      console.error("Error saving note: ", err);
+      alert('เกิดข้อผิดพลาดในการบันทึกหมายเหตุ: ' + (err as Error).message);
+    }
   };
 
   const handleAddMaintenance = async (e) => {
@@ -1015,8 +1081,11 @@ const App = () => {
             <div className="bg-blue-600 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 text-white shadow-lg shadow-blue-500/25">
               <Building2 size={28} className="sm:w-8 sm:h-8" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">DormManager</h1>
-            <p className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">ระบบจัดการหอพักและห้องเช่า</p>
+            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">{billConfig.dormName || 'DormManager'}</h1>
+            {billConfig.slogan && (
+              <p className="text-xs sm:text-sm text-blue-600 font-semibold mt-1 italic tracking-tight">"{billConfig.slogan}"</p>
+            )}
+            <p className="text-xs sm:text-sm text-gray-400 mt-1">ระบบจัดการหอพักและห้องเช่า</p>
           </div>
 
           <div className="space-y-4 sm:space-y-5">
@@ -1102,6 +1171,11 @@ const App = () => {
             <span className="text-base font-black tracking-tight text-white block leading-tight truncate">
               {billConfig.dormName || 'DormManager'}
             </span>
+            {billConfig.slogan && (
+              <span className="text-[10px] text-blue-300 font-medium truncate block leading-tight">
+                {billConfig.slogan}
+              </span>
+            )}
             <span className="text-[10px] text-gray-400 font-semibold mt-0.5 block truncate">
               {authRole === 'admin' ? 'โหมดผู้ดูแลระบบ' : authRole === 'tenant' ? `ห้อง ${loggedInRoom?.id || ''}` : 'โหมดผู้เยี่ยมชม'}
             </span>
@@ -1141,6 +1215,11 @@ const App = () => {
               <span className="text-base lg:text-lg font-black tracking-tight text-white block leading-tight truncate">
                 {billConfig.dormName || 'DormManager'}
               </span>
+              {billConfig.slogan && (
+                <span className="text-[11px] text-blue-300 font-medium truncate block leading-tight mt-0.5">
+                  {billConfig.slogan}
+                </span>
+              )}
               <span className="text-[11px] text-gray-400 font-medium lg:hidden">
                 เมนูหลัก (Main Menu)
               </span>
@@ -1189,7 +1268,12 @@ const App = () => {
               <SidebarItem id="billing" icon={Zap} label="คำนวณค่าเช่า/มิเตอร์" />
               <SidebarItem id="billDesign" icon={Settings} label="ตั้งค่าใบแจ้งหนี้" />
               <SidebarItem id="expenses" icon={Wallet} label="รายจ่ายหอพัก" />
-              <SidebarItem id="maintenance" icon={Wrench} label="จัดการแจ้งซ่อม/ปัญหา" />
+              <SidebarItem 
+                id="maintenance" 
+                icon={Wrench} 
+                label="จัดการแจ้งซ่อม/ปัญหา" 
+                badge={maintenance.filter(m => m.status === 'pending').length > 0 ? maintenance.filter(m => m.status === 'pending').length : null} 
+              />
             </>
           )}
           {authRole === 'tenant' && (
@@ -1211,6 +1295,9 @@ const App = () => {
             )}
             <div className="min-w-0">
               <h4 className="text-xs font-bold text-gray-200 truncate uppercase tracking-tight leading-tight">{billConfig.dormName}</h4>
+              {billConfig.slogan && (
+                <p className="text-[10px] text-blue-300 font-medium truncate mt-0.5 italic">"{billConfig.slogan}"</p>
+              )}
               <p className="text-[9px] font-bold text-gray-400 mt-0.5 flex items-center gap-1 uppercase tracking-wider">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ข้อมูลหอพัก
               </p>
@@ -1246,7 +1333,7 @@ const App = () => {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-4 md:p-8 relative print:p-0 print:bg-white">
+      <main className="flex-1 overflow-y-auto p-3.5 sm:p-4 md:p-8 relative print:p-0 print:bg-white">
         
         {/* Full Image Modal */}
         {expandedImage && (
@@ -1263,6 +1350,10 @@ const App = () => {
                     <button onClick={() => setIsBookingModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-900"><X /></button>
                     <div className="text-center mb-5">
                         <h2 className="text-xl md:text-2xl font-black text-gray-900">จองห้องพัก {selectedRoom.id}</h2>
+                        <p className="text-xs font-bold text-gray-700 mt-0.5">{billConfig.dormName}</p>
+                        {billConfig.slogan && (
+                          <p className="text-[11px] text-blue-600 font-semibold italic mt-0.5">"{billConfig.slogan}"</p>
+                        )}
                         <p className="text-xs text-gray-500 mt-1">กรุณาโอนเงินมัดจำและอัปโหลดหลักฐานเพื่อจองห้อง</p>
                     </div>
 
@@ -1443,7 +1534,10 @@ const App = () => {
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <h2 className="text-base sm:text-2xl font-black text-gray-900 tracking-tight mb-1 uppercase break-words leading-tight">{billConfig.dormName || 'หอพัก'}</h2>
+                        <h2 className="text-base sm:text-2xl font-black text-gray-900 tracking-tight mb-0.5 uppercase break-words leading-tight">{billConfig.dormName || 'หอพัก'}</h2>
+                        {billConfig.slogan && (
+                          <p className="text-xs sm:text-sm font-semibold text-blue-600 mb-1 italic tracking-tight">"{billConfig.slogan}"</p>
+                        )}
                         <p className="text-[11px] sm:text-xs text-gray-500 max-w-sm leading-relaxed">{billConfig.address || '-'}</p>
                         <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">โทร: {billConfig.phone || '-'} {billConfig.taxId ? `| เลขผู้เสียภาษี: ${billConfig.taxId}` : ''}</p>
                       </div>
@@ -1627,22 +1721,32 @@ const App = () => {
         {isContractPreviewOpen && selectedContractRoom && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm print:relative print:bg-white print:inset-0 print:p-0 print:block">
             <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[94vh] sm:max-h-[92vh] overflow-hidden print:shadow-none print:max-w-none print:w-full print:max-h-none print:rounded-none">
-              <div className="bg-gray-50 p-4 border-b flex justify-between items-center print:hidden shrink-0 z-20">
-                <div className="flex items-center gap-2 text-gray-600"><FileSearch size={18} /><span className="font-bold">รายละเอียดสัญญาเช่า</span></div>
-                <div className="flex gap-2">
-                  <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-blue-700"><Printer size={18} /> พิมพ์สัญญา</button>
-                  <button onClick={() => setIsContractPreviewOpen(false)} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold">ปิด</button>
+              <div className="bg-gray-50 p-3 sm:p-4 border-b flex justify-between items-center print:hidden shrink-0 z-20">
+                <div className="flex items-center gap-2 text-gray-700 text-xs sm:text-sm font-bold truncate">
+                  <FileSearch size={18} className="text-blue-600 shrink-0" />
+                  <span className="truncate">รายละเอียดสัญญาเช่า: ห้อง {selectedContractRoom.id}</span>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={handlePrint} className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 hover:bg-blue-700 active:scale-95 transition-all">
+                    <Printer size={16} /> พิมพ์สัญญา
+                  </button>
+                  <button onClick={() => setIsContractPreviewOpen(false)} className="bg-gray-200 text-gray-700 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold active:scale-95 transition-all">
+                    ปิด
+                  </button>
                 </div>
               </div>
 
-              <div className="p-4 sm:p-8 md:p-10 overflow-y-auto flex-1 print:p-0 text-sm leading-relaxed" id="contract-print-area">
-                <div className="text-center mb-8">
-                  <h2 className="text-2xl font-black mb-2">หนังสือสัญญาเช่าที่พักอาศัย</h2>
-                  <p className="font-bold">{billConfig.dormName}</p>
-                  <p className="text-[10px] text-gray-500">เลขที่สัญญา: {selectedContractRoom.contractId || '-'}</p>
+              <div className="p-4 sm:p-8 md:p-10 overflow-y-auto flex-1 print:p-0 text-xs sm:text-sm leading-relaxed" id="contract-print-area">
+                <div className="text-center mb-6 sm:mb-8">
+                  <h2 className="text-xl sm:text-2xl font-black mb-1">หนังสือสัญญาเช่าที่พักอาศัย</h2>
+                  <p className="font-bold text-sm sm:text-base text-gray-900">{billConfig.dormName}</p>
+                  {billConfig.slogan && (
+                    <p className="text-xs font-semibold text-blue-600 italic mt-0.5">"{billConfig.slogan}"</p>
+                  )}
+                  <p className="text-[10px] text-gray-500 mt-1">เลขที่สัญญา: {selectedContractRoom.contractId || '-'}</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-10 mb-8 border-b pb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-10 mb-6 sm:mb-8 border-b pb-6 sm:pb-8 print:grid-cols-2 print:gap-10">
                   <div>
                     <h3 className="font-black text-blue-600 uppercase text-[10px] mb-2 tracking-widest">ข้อมูลผู้เช่า</h3>
                     <p><span className="font-bold">ชื่อ-นามสกุล:</span> {selectedContractRoom.tenant}</p>
@@ -1674,7 +1778,7 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-10 text-center mt-20">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-10 text-center mt-10 sm:mt-20 print:grid-cols-2 print:mt-16">
                   <div>
                     <div className="w-48 border-b border-black mx-auto mb-2"></div>
                     <p className="font-bold text-xs">(........................................................)</p>
@@ -1819,32 +1923,93 @@ const App = () => {
                   </div>
                   
                   {/* ID Card Upload / Camera Photo Preview */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center justify-between">
-                      <span>สำเนาบัตรประชาชนผู้เช่า (สำหรับแนบท้ายสัญญา)</span>
-                      {tenantForm.idCardImage && <span className="text-emerald-600 font-bold lowercase flex items-center gap-1"><CheckCircle size={11} /> มีภาพบัตรแล้ว</span>}
-                    </label>
-                    <div className="relative border-2 border-dashed rounded-xl p-4 bg-gray-50 flex items-center justify-center gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">
+                        สำเนาบัตรประชาชนผู้เช่า (สำหรับแนบท้ายสัญญา)
+                      </label>
+                      {tenantForm.idCardImage && (
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                            ขนาด: {getImageSizeKB(tenantForm.idCardImage)} KB
+                          </span>
+                          <span className="text-emerald-600 font-bold flex items-center gap-1">
+                            <CheckCircle size={12} /> บีบอัดลดขนาดแล้ว
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="relative border-2 border-dashed rounded-xl p-4 bg-gray-50 flex items-center justify-center">
                       {tenantForm.idCardImage ? (
                         <div className="flex flex-col items-center gap-3 w-full">
-                          <img src={tenantForm.idCardImage} className="w-full max-h-48 object-contain rounded border shadow-sm" alt="ID Card" />
-                          <div className="flex items-center gap-2 flex-wrap justify-center">
-                             <span className="text-xs font-bold text-green-600 flex items-center gap-1"><CheckCircle size={14} /> บันทึกสำเนาบัตรประชาชนแล้ว</span>
-                             <button type="button" onClick={() => setTenantForm({...tenantForm, idCardImage: null})} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg border border-red-200 text-xs font-bold flex items-center gap-1 transition-colors"><Trash2 size={13} /> ลบรูป</button>
+                          <div className="relative group max-w-sm w-full bg-white p-2 rounded-xl border shadow-sm">
+                            <img 
+                              src={tenantForm.idCardImage} 
+                              className="w-full max-h-48 object-contain rounded" 
+                              alt="ID Card" 
+                            />
+                            <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedImage(tenantForm.idCardImage)}
+                                className="px-2 py-1 bg-black/75 hover:bg-black text-white text-[11px] font-bold rounded-lg shadow-sm backdrop-blur-xs flex items-center gap-1 transition"
+                                title="ดูภาพขยายเต็มจอเพื่อตรวจสอบความคมชัด"
+                              >
+                                <Eye size={12} /> ดูภาพเต็ม
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap justify-center text-xs">
+                             <span className="text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-lg border border-green-200 flex items-center gap-1.5">
+                               <CheckCircle size={14} className="text-green-600" /> 
+                               ขนาด {getImageSizeKB(tenantForm.idCardImage)} KB (ลดขนาดลง ~95% ประหยัดพื้นที่ฐานข้อมูล)
+                             </span>
+                             {getImageSizeKB(tenantForm.idCardImage) > 250 && (
+                               <button
+                                 type="button"
+                                 onClick={async () => {
+                                   if (tenantForm.idCardImage) {
+                                     const recompressed = await compressImage(tenantForm.idCardImage, 0.15, 900);
+                                     setTenantForm(prev => ({ ...prev, idCardImage: recompressed }));
+                                   }
+                                 }}
+                                 className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1"
+                                 title="บีบอัดลดขนาดภาพนี้ให้เล็กลงอีก (~120 KB)"
+                               >
+                                 ⚡ บีบอัดลดขนาดเป็น ~120 KB
+                               </button>
+                             )}
+                             <button 
+                               type="button" 
+                               onClick={() => setTenantForm({...tenantForm, idCardImage: null})} 
+                               className="text-red-500 hover:bg-red-50 px-2 py-1 rounded-lg border border-red-200 text-xs font-bold flex items-center gap-1 transition-colors"
+                             >
+                               <Trash2 size={13} /> ลบรูป
+                             </button>
                           </div>
                         </div>
                       ) : (
-                        <div className="flex flex-col items-center gap-2 text-gray-400 cursor-pointer py-4">
+                        <div className="flex flex-col items-center gap-2 text-gray-400 py-3 text-center">
                           <Camera size={32} className="text-blue-500" />
-                          <span className="text-xs font-bold uppercase text-gray-600">ถ่ายรูปบัตร / อัปโหลดสำเนาบัตรประชาชน</span>
-                          <span className="text-[11px] text-gray-400">รองรับทั้งการถ่ายด้วยกล้องมือถือและการเลือกรูปภาพ</span>
-                          <input type="file" accept="image/*" capture="environment" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              processIdCardWithAI(file, 'tenant');
-                              e.target.value = '';
-                            }
-                          }} />
+                          <span className="text-xs font-bold uppercase text-gray-700">ถ่ายรูปบัตร / อัปโหลดสำเนาบัตรประชาชน</span>
+                          <span className="text-[11px] text-gray-500 max-w-sm">
+                            ระบบลดขนาดภาพให้อัตโนมัติเหลือเพียง ~100-200 KB (ลดลงกว่า 95%) โดยยังคงความคมชัดสูงสำหรับแนบท้ายสัญญาและพิมพ์เอกสาร
+                          </span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            capture="environment" 
+                            className="absolute inset-0 opacity-0 cursor-pointer" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processIdCardWithAI(file, 'tenant');
+                                e.target.value = '';
+                              }
+                            }} 
+                          />
                         </div>
                       )}
                     </div>
@@ -2008,8 +2173,8 @@ const App = () => {
           </div>
         )}
 
-        <header className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
-          <h1 className="text-xl md:text-2xl font-black text-gray-900 leading-tight">
+        <header className="mb-4 sm:mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 print:hidden">
+          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-gray-900 leading-tight">
             {activeTab === 'dashboard' && 'แดชบอร์ดสรุปผล (Real-time)'}
             {activeTab === 'rooms' && 'ผังห้องพักรายตึก'}
             {activeTab === 'billing' && 'คำนวณค่าเช่า/มิเตอร์'}
@@ -2026,21 +2191,21 @@ const App = () => {
         </header>
 
         {authRole === 'tenant' && tenantUnpaidBills.length > 0 && (
-          <div className="mb-8 p-5 bg-red-50 border border-red-200 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm animate-pulse print:hidden">
-            <div className="flex items-center gap-4">
-              <div className="bg-red-500 text-white p-3 rounded-xl shadow-md shrink-0">
-                <AlertTriangle size={24} />
+          <div className="mb-6 sm:mb-8 p-4 sm:p-5 bg-red-50 border border-red-200 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm animate-pulse print:hidden">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="bg-red-500 text-white p-2.5 sm:p-3 rounded-xl shadow-md shrink-0">
+                <AlertTriangle size={22} />
               </div>
               <div>
-                <h3 className="font-extrabold text-red-900 text-lg">แจ้งเตือน: ถึงกำหนดชำระ / มียอดค้างชำระหอพัก</h3>
-                <p className="text-sm text-red-600 font-medium">
+                <h3 className="font-extrabold text-red-900 text-base sm:text-lg">แจ้งเตือน: ถึงกำหนดชำระ / มียอดค้างชำระหอพัก</h3>
+                <p className="text-xs sm:text-sm text-red-600 font-medium">
                   คุณมียอดค้างชำระค่าเช่าหรือมิเตอร์รวม <span className="underline font-bold text-red-800">{tenantUnpaidBills.length} รายการ</span> โปรดชำระเงินและแนบหลักฐานสลิปเพื่อขอตรวจสอบแจ้งชำระเงิน
                 </p>
               </div>
             </div>
             <button 
               onClick={() => setActiveTab('tenant_bills')} 
-              className="bg-red-600 hover:bg-red-700 text-white font-black text-sm px-5 py-3 rounded-xl transition duration-250 shadow-md transform hover:scale-[1.01] flex items-center gap-2 shrink-0 active:scale-95"
+              className="bg-red-600 hover:bg-red-700 text-white font-black text-xs sm:text-sm px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl transition duration-250 shadow-md transform hover:scale-[1.01] flex items-center justify-center gap-2 shrink-0 active:scale-95 w-full md:w-auto"
             >
               <CreditCard size={16} /> ตรวจสอบบิล & แนบสลิป
             </button>
@@ -2048,37 +2213,115 @@ const App = () => {
         )}
 
         {activeTab === 'dashboard' && (
-          <div className="space-y-8 print:hidden">
-            <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-2xl border shadow-sm">
-                <div className="flex items-center gap-2 text-gray-600"><Calendar size={20} className="text-blue-600" /><span className="font-bold">เลือกช่วงเวลาข้อมูล:</span></div>
-                <div className="flex gap-2">
-                  <select className="p-2 border rounded-xl bg-gray-50 font-bold" value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))}>{months.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-                  <select className="p-2 border rounded-xl bg-gray-50 font-bold" value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))}>{[2024, 2025, 2026].map(y => <option key={y} value={y}>พ.ศ. {y + 543}</option>)}</select>
+          <div className="space-y-4 sm:space-y-6 md:space-y-8 print:hidden">
+            {/* Filter Bar */}
+            <div className="bg-white p-3.5 sm:p-5 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-gray-700">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <Calendar size={18} />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs sm:text-sm text-gray-900 block leading-tight">เลือกช่วงเวลาข้อมูล</span>
+                    <span className="text-[10px] sm:text-xs text-gray-400">ประมวลผลสถิติแบบ Real-time</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <select 
+                    className="flex-1 sm:flex-initial py-2 px-3 border rounded-xl bg-gray-50 text-xs sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                    value={selectedMonth} 
+                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                  >
+                    {months.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                  <select 
+                    className="flex-1 sm:flex-initial py-2 px-3 border rounded-xl bg-gray-50 text-xs sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                    value={selectedYear} 
+                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                  >
+                    {[2024, 2025, 2026].map(y => <option key={y} value={y}>พ.ศ. {y + 543}</option>)}
+                  </select>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-sm text-gray-500 font-semibold">รายรับ (Cloud)</p><h2 className="text-3xl font-bold text-blue-600">{dashboardStats.totalIncome.toLocaleString()} ฿</h2><p className="text-xs text-orange-500 mt-1">ค้าง: {dashboardStats.totalPending.toLocaleString()} ฿</p></div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-sm text-gray-500 font-semibold">รายจ่ายรวม</p><h2 className="text-3xl font-bold text-red-600">{dashboardStats.totalExpense.toLocaleString()} ฿</h2></div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-sm text-gray-500 font-semibold">กำไรสุทธิ</p><h2 className={`text-3xl font-bold ${dashboardStats.profit >= 0 ? 'text-green-600' : 'text-red-800'}`}>{dashboardStats.profit.toLocaleString()} ฿</h2></div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-sm text-gray-500 font-semibold">งานซ่อมคงค้าง</p><h2 className="text-3xl font-bold text-orange-600">{maintenance.filter(m => m.status === 'pending').length}</h2></div>
+            {/* 4 Stats Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
+                <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl shadow-xs border border-gray-100 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1 sm:mb-2">
+                    <p className="text-xs sm:text-sm text-gray-500 font-bold truncate">รายรับ (Cloud)</p>
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-2xl lg:text-3xl font-black text-blue-600 truncate tracking-tight">{dashboardStats.totalIncome.toLocaleString()} ฿</h2>
+                    <p className="text-[10px] sm:text-xs text-orange-600 font-semibold mt-1 truncate">ค้าง: {dashboardStats.totalPending.toLocaleString()} ฿</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl shadow-xs border border-gray-100 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1 sm:mb-2">
+                    <p className="text-xs sm:text-sm text-gray-500 font-bold truncate">รายจ่ายรวม</p>
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-2xl lg:text-3xl font-black text-red-600 truncate tracking-tight">{dashboardStats.totalExpense.toLocaleString()} ฿</h2>
+                    <p className="text-[10px] sm:text-xs text-gray-400 font-semibold mt-1 truncate">รายจ่ายประจำเดือน</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl shadow-xs border border-gray-100 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1 sm:mb-2">
+                    <p className="text-xs sm:text-sm text-gray-500 font-bold truncate">กำไรสุทธิ</p>
+                    <span className={`w-2 h-2 rounded-full ${dashboardStats.profit >= 0 ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                  </div>
+                  <div>
+                    <h2 className={`text-base sm:text-2xl lg:text-3xl font-black ${dashboardStats.profit >= 0 ? 'text-green-600' : 'text-red-800'} truncate tracking-tight`}>{dashboardStats.profit.toLocaleString()} ฿</h2>
+                    <p className="text-[10px] sm:text-xs text-gray-400 font-semibold mt-1 truncate">รายรับหักรายจ่าย</p>
+                  </div>
+                </div>
+
+                <div 
+                  onClick={() => setActiveTab('maintenance')} 
+                  className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl shadow-xs border border-gray-100 hover:border-orange-300 hover:shadow-md cursor-pointer transition-all group flex flex-col justify-between active:scale-[0.98]"
+                  title="คลิกเพื่อไปที่หน้ารับและจัดการงานซ่อม"
+                >
+                  <div className="flex items-center justify-between mb-1 sm:mb-2">
+                    <p className="text-xs sm:text-sm text-gray-500 font-bold truncate">งานซ่อมคงค้าง</p>
+                    <span className="text-[9px] sm:text-[10px] text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded-full group-hover:bg-orange-100 transition-colors">จัดการ →</span>
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-2xl lg:text-3xl font-black text-orange-600 tracking-tight">{maintenance.filter(m => m.status === 'pending').length}</h2>
+                    <p className="text-[10px] sm:text-xs text-gray-400 font-semibold mt-1 truncate">ทั้งหมด {maintenance.length} รายการ</p>
+                  </div>
+                </div>
             </div>
 
-             <div className="bg-white rounded-3xl border shadow-sm p-8">
-                <div className="flex justify-between items-center mb-6"><div><h3 className="font-black text-xl flex items-center gap-2"><Building2 className="text-blue-600" /> สรุปห้องพักรายตึก</h3></div></div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Building Occupancy Summary */}
+             <div className="bg-white rounded-2xl sm:rounded-3xl border shadow-xs p-4 sm:p-6 md:p-8">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 sm:mb-6">
+                  <div>
+                    <h3 className="font-black text-base sm:text-xl text-gray-900 flex items-center gap-2">
+                      <Building2 className="text-blue-600" size={20} /> สรุปห้องพักรายตึก
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-gray-400 mt-0.5">จำนวนห้องว่างและห้องที่มีผู้เช่าพักอาศัย</p>
+                  </div>
+                  <span className="self-start sm:self-auto text-[11px] sm:text-xs font-bold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                    ทั้งหมด {rooms.length} ห้อง
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4 md:gap-6">
                   {[...new Set(rooms.map(r => r.building))].sort().map(bld => {
                     const bldRooms = rooms.filter(r => r.building === bld);
                     const available = bldRooms.filter(r => r.status === 'available').length;
+                    const occupied = bldRooms.filter(r => r.status === 'occupied').length;
                     return (
-                      <div key={bld} className="border rounded-2xl p-6 bg-gray-50 flex items-center justify-between">
+                      <div key={bld} className="border rounded-xl sm:rounded-2xl p-3.5 sm:p-5 bg-gray-50/70 hover:bg-white flex items-center justify-between transition-all">
                         <div>
-                          <h4 className="font-bold text-lg mb-1 text-gray-900">ตึก {bld}</h4>
-                          <p className="text-xs text-gray-500 font-medium">ห้องทั้งหมด {bldRooms.length} ห้อง</p>
+                          <h4 className="font-black text-base sm:text-lg text-gray-900">อาคาร {bld}</h4>
+                          <p className="text-[11px] sm:text-xs text-gray-500 font-medium">รวม {bldRooms.length} ห้อง (เช่าอยู่ {occupied})</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">ห้องว่าง</p>
-                          <p className={`text-3xl font-black ${available > 0 ? 'text-green-600' : 'text-red-500'}`}>{available}</p>
+                          <p className="text-[9px] sm:text-[10px] text-gray-400 font-bold uppercase mb-0.5">ห้องว่าง</p>
+                          <p className={`text-2xl sm:text-3xl font-black leading-none ${available > 0 ? 'text-green-600' : 'text-red-500'}`}>{available}</p>
                         </div>
                       </div>
                     );
@@ -2086,29 +2329,66 @@ const App = () => {
                 </div>
              </div>
 
-            <div className="bg-white rounded-3xl border shadow-sm p-8">
-               <div className="flex justify-between items-center mb-8"><div><h3 className="font-black text-xl flex items-center gap-2"><TrendingUp className="text-blue-600" /> สรุปบัญชีรายเดือน</h3></div></div>
-               <div className="relative h-64 w-full flex items-end justify-around border-b px-4">
+            {/* Monthly Accounting Chart */}
+            <div className="bg-white rounded-2xl sm:rounded-3xl border shadow-xs p-4 sm:p-6 md:p-8">
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-4 sm:mb-6">
+                 <div>
+                   <h3 className="font-black text-base sm:text-xl text-gray-900 flex items-center gap-2">
+                     <TrendingUp className="text-blue-600" size={20} /> สรุปบัญชีรายเดือน
+                   </h3>
+                   <p className="text-[11px] sm:text-xs text-gray-400 mt-0.5">เปรียบเทียบสัดส่วนรายรับ รายจ่าย และกำไรสุทธิ</p>
+                 </div>
+               </div>
+
+               <div className="relative h-44 sm:h-64 w-full flex items-end justify-around border-b px-2 sm:px-6 pt-8 pb-2">
                   {(() => {
                     const max = Math.max(dashboardStats.totalIncome, dashboardStats.totalExpense, Math.abs(dashboardStats.profit), 1000);
-                    const getH = (val) => `${(Math.abs(val) / max) * 100}%`;
+                    const getH = (val) => `${Math.max(8, (Math.abs(val) / max) * 100)}%`;
                     return (
                       <>
-                        <div className="flex flex-col items-center gap-3 w-1/4">
-                          <div className="w-full bg-blue-100 rounded-t-2xl relative" style={{ height: getH(dashboardStats.totalIncome) }}><span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-blue-600">{dashboardStats.totalIncome.toLocaleString()}</span></div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">รายรับ</span>
+                        <div className="flex flex-col items-center gap-2 w-1/4 max-w-[80px] sm:max-w-[100px]">
+                          <div className="w-full bg-blue-100 hover:bg-blue-200 transition-colors rounded-t-xl sm:rounded-t-2xl relative" style={{ height: getH(dashboardStats.totalIncome) }}>
+                            <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] sm:text-xs font-black text-blue-600 whitespace-nowrap">
+                              {dashboardStats.totalIncome.toLocaleString()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">รายรับ</span>
                         </div>
-                        <div className="flex flex-col items-center gap-3 w-1/4">
-                          <div className="w-full bg-red-100 rounded-t-2xl relative" style={{ height: getH(dashboardStats.totalExpense) }}><span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-red-600">{dashboardStats.totalExpense.toLocaleString()}</span></div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">รายจ่าย</span>
+                        <div className="flex flex-col items-center gap-2 w-1/4 max-w-[80px] sm:max-w-[100px]">
+                          <div className="w-full bg-red-100 hover:bg-red-200 transition-colors rounded-t-xl sm:rounded-t-2xl relative" style={{ height: getH(dashboardStats.totalExpense) }}>
+                            <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] sm:text-xs font-black text-red-600 whitespace-nowrap">
+                              {dashboardStats.totalExpense.toLocaleString()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">รายจ่าย</span>
                         </div>
-                        <div className="flex flex-col items-center gap-3 w-1/4">
-                          <div className={`w-full ${dashboardStats.profit >= 0 ? 'bg-green-100' : 'bg-red-900'} rounded-t-2xl relative`} style={{ height: getH(dashboardStats.profit) }}><span className={`absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold ${dashboardStats.profit >= 0 ? 'text-green-600' : 'text-red-900'}`}>{dashboardStats.profit.toLocaleString()}</span></div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase">กำไร</span>
+                        <div className="flex flex-col items-center gap-2 w-1/4 max-w-[80px] sm:max-w-[100px]">
+                          <div className={`w-full ${dashboardStats.profit >= 0 ? 'bg-green-100 hover:bg-green-200' : 'bg-red-200'} transition-colors rounded-t-xl sm:rounded-t-2xl relative`} style={{ height: getH(dashboardStats.profit) }}>
+                            <span className={`absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] sm:text-xs font-black whitespace-nowrap ${dashboardStats.profit >= 0 ? 'text-green-600' : 'text-red-900'}`}>
+                              {dashboardStats.profit.toLocaleString()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase">กำไร</span>
                         </div>
                       </>
                     );
                   })()}
+               </div>
+
+               {/* Mobile-friendly financial breakdown chips */}
+               <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-gray-100 text-center">
+                 <div className="bg-blue-50/70 p-2 sm:p-2.5 rounded-xl border border-blue-100/80">
+                   <span className="text-[9px] sm:text-xs font-bold text-blue-600 block">รายรับ</span>
+                   <span className="text-xs sm:text-sm font-black text-blue-900 block truncate">{dashboardStats.totalIncome.toLocaleString()} ฿</span>
+                 </div>
+                 <div className="bg-red-50/70 p-2 sm:p-2.5 rounded-xl border border-red-100/80">
+                   <span className="text-[9px] sm:text-xs font-bold text-red-600 block">รายจ่าย</span>
+                   <span className="text-xs sm:text-sm font-black text-red-900 block truncate">{dashboardStats.totalExpense.toLocaleString()} ฿</span>
+                 </div>
+                 <div className={`${dashboardStats.profit >= 0 ? 'bg-green-50/70 border-green-100/80 text-green-900' : 'bg-red-50/70 border-red-100/80 text-red-900'} p-2 sm:p-2.5 rounded-xl border`}>
+                   <span className={`text-[9px] sm:text-xs font-bold block ${dashboardStats.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>กำไรสุทธิ</span>
+                   <span className="text-xs sm:text-sm font-black block truncate">{dashboardStats.profit.toLocaleString()} ฿</span>
+                 </div>
                </div>
             </div>
           </div>
@@ -3083,9 +3363,66 @@ const App = () => {
           <div className="max-w-4xl mx-auto space-y-8">
             <div className="bg-white p-8 rounded-3xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-10">
               <div className="space-y-6">
-                <div className="flex items-center gap-2 pb-4 border-b"><Settings className="text-blue-600" /><h3 className="font-black text-xl">ข้อมูลหอพัก (Public)</h3></div>
+                <div className="flex items-center justify-between pb-4 border-b">
+                  <div className="flex items-center gap-2">
+                    <Settings className="text-blue-600" />
+                    <h3 className="font-black text-xl">ข้อมูลหอพัก (Public)</h3>
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
+                    <Check size={13} /> Cloud Real-time
+                  </span>
+                </div>
                 <div className="space-y-4">
-                  <div><label className="block text-[10px] font-bold text-gray-400 uppercase">ชื่อหอพัก</label><input type="text" disabled={authRole !== 'admin'} className="w-full p-3 border rounded-2xl disabled:bg-gray-100 bg-gray-50" value={billConfig.dormName} onChange={e => handleUpdateConfig({...billConfig, dormName: e.target.value})} /></div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">ชื่อหอพัก</label>
+                    <input 
+                      type="text" 
+                      disabled={authRole !== 'admin'} 
+                      className="w-full p-3 border rounded-2xl disabled:bg-gray-100 bg-gray-50 font-bold text-gray-900 focus:bg-white focus:border-blue-500 outline-none transition-all" 
+                      value={billConfig.dormName} 
+                      onChange={e => handleUpdateConfig({...billConfig, dormName: e.target.value})} 
+                      placeholder="เช่น บจก. ดอร์ม แมเนเจอร์ หรือ หอพักแสนสุข"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1.5">
+                        <Quote size={13} className="text-blue-600" />
+                        <span>สโลแกน ของหอพัก (Slogan)</span>
+                      </label>
+                      <span className="text-[9px] bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
+                        แสดงทุกจุดที่มีชื่อหอพัก
+                      </span>
+                    </div>
+                    <input 
+                      type="text" 
+                      disabled={authRole !== 'admin'} 
+                      className="w-full p-3 border border-blue-200 rounded-2xl disabled:bg-gray-100 bg-blue-50/20 focus:bg-white focus:border-blue-500 outline-none transition-all font-medium text-gray-900" 
+                      value={billConfig.slogan || ''} 
+                      onChange={e => handleUpdateConfig({...billConfig, slogan: e.target.value})} 
+                      placeholder="เช่น อบอุ่น ปลอดภัย สะดวกสบาย เหมือนบ้านคุณ"
+                    />
+                    <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                      💡 สโลแกนนี้จะปรากฏควบคู่กับชื่อหอพักในทุกจุด (หัวเว็บ, แถบเมนูด้านข้าง, บัตรข้อมูลหอพัก, หัวใบแจ้งหนี้/ใบเสร็จ, สัญญาเช่า, และแดชบอร์ด)
+                    </p>
+                  </div>
+
+                  {/* Live Branding Preview Card */}
+                  <div className="p-3.5 bg-gradient-to-br from-blue-50/70 to-indigo-50/50 rounded-2xl border border-blue-100 space-y-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 flex items-center gap-1">
+                      <Sparkles size={12} /> ตัวอย่างการแสดงผลชื่อ & สโลแกนหอพัก
+                    </span>
+                    <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-2xs">
+                      <h4 className="text-base font-black text-gray-900 leading-tight">{billConfig.dormName || 'ชื่อหอพัก'}</h4>
+                      {billConfig.slogan ? (
+                        <p className="text-xs font-semibold text-blue-600 italic mt-0.5">"{billConfig.slogan}"</p>
+                      ) : (
+                        <p className="text-xs text-gray-400 italic mt-0.5">(ยังไม่ได้ระบุสโลแกน)</p>
+                      )}
+                    </div>
+                  </div>
+
                   <div><label className="block text-[10px] font-bold text-gray-400 uppercase">ที่อยู่</label><textarea disabled={authRole !== 'admin'} className="w-full p-3 border rounded-2xl disabled:bg-gray-100 bg-gray-50 h-24" value={billConfig.address} onChange={e => handleUpdateConfig({...billConfig, address: e.target.value})} /></div>
                   <div className="grid grid-cols-2 gap-4">
                     <div><label className="block text-[10px] font-bold text-gray-400 uppercase">เบอร์โทร</label><input type="text" disabled={authRole !== 'admin'} className="w-full p-3 border rounded-2xl disabled:bg-gray-100 bg-gray-50" value={billConfig.phone} onChange={e => handleUpdateConfig({...billConfig, phone: e.target.value})} /></div>
@@ -3120,57 +3457,486 @@ const App = () => {
           </div>
         )}
 
-        {activeTab === 'maintenance' && (
-          <div className="space-y-6 print:hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1 bg-white p-6 rounded-2xl border shadow-sm h-fit">
-                <h3 className="font-bold mb-4 text-orange-600 flex items-center gap-2"><Wrench size={18} /> แจ้งซ่อม Cloud</h3>
-                {authRole === 'admin' ? (
-                  <form onSubmit={handleAddMaintenance} className="space-y-4">
-                    <select className="w-full p-2.5 border rounded-xl bg-gray-50" required value={newMaintenance.roomId} onChange={e => setNewMaintenance({...newMaintenance, roomId: e.target.value})}>
-                          <option value="">เลือกห้อง...</option>
-                          {rooms.filter(r => r.status === 'occupied').map(r => (<option key={`${r.building}-${r.id}`} value={`${r.id} (${r.building})`}>ตึก {r.building} - ห้อง {r.id}</option>))}
-                    </select>
-                    <textarea required placeholder="รายละเอียดปัญหา..." className="w-full p-2.5 border rounded-xl h-24" value={newMaintenance.issue} onChange={e => setNewMaintenance({...newMaintenance, issue: e.target.value})}></textarea>
-                    <div className="relative border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center bg-gray-50 overflow-hidden shadow-inner">
-                      {newMaintenance.image ? <img src={newMaintenance.image} className="w-full h-56 object-cover rounded-lg shadow-sm" alt="Issue" /> : <><Upload size={32} className="text-gray-400" /><span className="text-[10px] text-gray-500 font-bold">อัปโหลดรูปถ่ายปัญหา (สำคัญมาก)</span></>}
-                      <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={async (e) => { const f = e.target.files[0]; if(f){ const compressed = await compressImage(f, 1); setNewMaintenance({...newMaintenance, image: compressed}); } }} />
-                    </div>
-                    <button type="submit" className="w-full py-3 bg-orange-600 text-white rounded-xl font-bold shadow-md">บันทึกแจ้งซ่อม</button>
-                  </form>
-                ) : (
-                  <div className="p-4 bg-gray-50 rounded-xl border border-dashed flex flex-col items-center justify-center text-gray-400">
-                    <Lock size={32} className="mb-2 opacity-50" />
-                    <p className="text-xs font-bold uppercase mt-2">สงวนสิทธิ์สำหรับ Admin</p>
+        {activeTab === 'maintenance' && (() => {
+          const totalIssues = maintenance.length;
+          const pendingIssues = maintenance.filter(m => m.status === 'pending').length;
+          const inProgressIssues = maintenance.filter(m => m.status === 'in_progress').length;
+          const completedIssues = maintenance.filter(m => m.status === 'completed').length;
+
+          const filteredMaintenance = maintenance.filter(m => {
+            const matchesStatus = maintenanceFilter === 'all' 
+              ? true 
+              : maintenanceFilter === 'in_progress'
+                ? m.status === 'in_progress'
+                : maintenanceFilter === 'pending'
+                  ? (m.status === 'pending' || !m.status)
+                  : m.status === 'completed';
+
+            const query = maintenanceSearch.trim().toLowerCase();
+            const matchesSearch = !query || 
+              (m.issue && m.issue.toLowerCase().includes(query)) ||
+              (m.roomId && m.roomId.toLowerCase().includes(query)) ||
+              (m.date && m.date.includes(query)) ||
+              (m.adminNote && m.adminNote.toLowerCase().includes(query));
+
+            return matchesStatus && matchesSearch;
+          });
+
+          return (
+            <div className="space-y-6 print:hidden">
+              {/* Top Summary Banner & Filter Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setMaintenanceFilter('all')}
+                  className={`p-4 rounded-2xl border text-left transition-all ${
+                    maintenanceFilter === 'all' 
+                      ? 'bg-blue-50 border-blue-300 shadow-sm ring-2 ring-blue-500/20' 
+                      : 'bg-white hover:bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">ทั้งหมด</p>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-black text-gray-900">{totalIssues}</span>
+                    <span className="text-xs text-gray-400">รายการ</span>
                   </div>
-                )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMaintenanceFilter('pending')}
+                  className={`p-4 rounded-2xl border text-left transition-all ${
+                    maintenanceFilter === 'pending' 
+                      ? 'bg-orange-50 border-orange-300 shadow-sm ring-2 ring-orange-500/20' 
+                      : 'bg-white hover:bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-orange-600 uppercase tracking-wider">รอดำเนินการ</p>
+                    {pendingIssues > 0 && <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></span>}
+                  </div>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-black text-orange-600">{pendingIssues}</span>
+                    <span className="text-xs text-orange-400">รายการ</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMaintenanceFilter('in_progress')}
+                  className={`p-4 rounded-2xl border text-left transition-all ${
+                    maintenanceFilter === 'in_progress' 
+                      ? 'bg-blue-50 border-blue-300 shadow-sm ring-2 ring-blue-500/20' 
+                      : 'bg-white hover:bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">กำลังซ่อม</p>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-black text-blue-600">{inProgressIssues}</span>
+                    <span className="text-xs text-blue-400">รายการ</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMaintenanceFilter('completed')}
+                  className={`p-4 rounded-2xl border text-left transition-all ${
+                    maintenanceFilter === 'completed' 
+                      ? 'bg-green-50 border-green-300 shadow-sm ring-2 ring-green-500/20' 
+                      : 'bg-white hover:bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-green-600 uppercase tracking-wider">ซ่อมเสร็จสิ้น</p>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-black text-green-600">{completedIssues}</span>
+                    <span className="text-xs text-green-400">รายการ</span>
+                  </div>
+                </button>
               </div>
-              <div className="lg:col-span-2 space-y-4">
-                {maintenance.map(m => (
-                  <div key={m.id} className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col sm:flex-row items-center gap-6">
-                      {m.image ? (
-                         <div className="w-full sm:w-48 h-32 rounded-xl overflow-hidden shadow-sm border shrink-0">
-                            <img src={m.image} className="w-full h-full object-cover" alt="Issue" />
-                         </div>
-                      ) : (
-                         <div className={`p-6 rounded-xl shrink-0 ${m.status === 'pending' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
-                            <Wrench size={32} />
-                         </div>
-                      )}
-                      <div className="flex-1 w-full">
-                        <p className="font-black text-xl text-gray-900">{m.issue}</p>
-                        <p className="text-xs text-gray-500 mt-1 uppercase font-bold tracking-wider">ห้อง {m.roomId} • วันแจ้ง: {m.date}</p>
-                        <div className="mt-4 flex items-center justify-between">
-                            <button onClick={() => authRole === 'admin' && toggleMaintenanceStatus(m)} className={`text-xs font-black px-6 py-2 rounded-xl transition-all shadow-sm ${m.status === 'pending' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'} ${authRole === 'admin' ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}>{m.status === 'pending' ? 'รอดำเนินการ' : 'ซ่อมเสร็จสิ้นแล้ว'}</button>
-                            {authRole === 'admin' && <button onClick={() => handleDeleteMaintenance(m.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="ลบรายการแจงซ่อม"><Trash2 size={20} /></button>}
+
+              {/* Search & Filter Controls */}
+              <div className="bg-white p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="relative w-full sm:w-80">
+                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาห้อง, อาการ, รายละเอียด..."
+                    value={maintenanceSearch}
+                    onChange={(e) => setMaintenanceSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  />
+                  {maintenanceSearch && (
+                    <button 
+                      onClick={() => setMaintenanceSearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end overflow-x-auto">
+                  <span className="text-xs font-bold text-gray-400 flex items-center gap-1 shrink-0">
+                    <Filter size={14} /> สถานะ:
+                  </span>
+                  {(['all', 'pending', 'in_progress', 'completed'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setMaintenanceFilter(tab)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                        maintenanceFilter === tab
+                          ? 'bg-gray-900 text-white shadow-xs'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tab === 'all' && 'ทั้งหมด'}
+                      {tab === 'pending' && `รอดำเนินการ (${pendingIssues})`}
+                      {tab === 'in_progress' && `กำลังซ่อม (${inProgressIssues})`}
+                      {tab === 'completed' && `เสร็จสิ้น (${completedIssues})`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Form to Create/Add New Repair Job */}
+                <div className="lg:col-span-1 bg-white p-6 rounded-2xl border shadow-sm h-fit space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b">
+                    <h3 className="font-bold text-orange-600 flex items-center gap-2">
+                      <Wrench size={18} /> รับเรื่อง / เพิ่มงานแจ้งซ่อม
+                    </h3>
+                    <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
+                      {authRole === 'admin' ? 'Admin Action' : 'แจ้งซ่อม'}
+                    </span>
+                  </div>
+
+                  {authRole === 'admin' ? (
+                    <form onSubmit={handleAddMaintenance} className="space-y-4">
+                      <div>
+                        <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">
+                          เลือกห้องพักที่แจ้งซ่อม <span className="text-red-500">*</span>
+                        </label>
+                        <select 
+                          className="w-full p-2.5 border rounded-xl bg-gray-50 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" 
+                          required 
+                          value={newMaintenance.roomId} 
+                          onChange={e => setNewMaintenance({...newMaintenance, roomId: e.target.value})}
+                        >
+                          <option value="">-- เลือกห้องพักที่มีผู้เช่า --</option>
+                          {rooms.map(r => (
+                            <option key={`${r.building}-${r.id}`} value={`${r.id} (${r.building})`}>
+                              ตึก {r.building} - ห้อง {r.id} {r.status === 'occupied' ? '(มีผู้เช่า)' : `(${r.status})`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">
+                          รายละเอียดปัญหา / อุปกรณ์ที่ชำรุด <span className="text-red-500">*</span>
+                        </label>
+                        <textarea 
+                          required 
+                          placeholder="เช่น แอร์ไม่เย็น, ก็อกน้ำรั่ว, ไฟห้องน้ำกระพริบ, ลูกบิดประตูหลวม..." 
+                          className="w-full p-2.5 border rounded-xl h-24 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" 
+                          value={newMaintenance.issue} 
+                          onChange={e => setNewMaintenance({...newMaintenance, issue: e.target.value})}
+                        ></textarea>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">
+                          รูปถ่ายจุดชำรุด / ปัญหา (ถ้ามี)
+                        </label>
+                        <div className="relative border-2 border-dashed border-gray-300 hover:border-orange-400 rounded-xl p-4 flex flex-col items-center justify-center bg-gray-50 hover:bg-orange-50/20 transition-all overflow-hidden shadow-inner group">
+                          {newMaintenance.image ? (
+                            <div className="relative w-full">
+                              <img src={newMaintenance.image} className="w-full h-44 object-cover rounded-lg shadow-xs" alt="Issue" />
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setNewMaintenance({...newMaintenance, image: null}); }}
+                                className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg shadow-md hover:bg-red-700 text-xs"
+                                title="ลบรูป"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <Upload size={28} className="text-gray-400 group-hover:text-orange-500 transition-colors mb-1" />
+                              <span className="text-xs text-gray-600 font-bold">อัปโหลดภาพถ่ายปัญหา</span>
+                              <span className="text-[10px] text-gray-400 mt-0.5">บีบอัดอัตโนมัติ ไม่เปลืองเนื้อที่</span>
+                            </>
+                          )}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="absolute inset-0 opacity-0 cursor-pointer" 
+                            onChange={async (e) => { 
+                              const f = e.target.files?.[0]; 
+                              if(f){ 
+                                const compressed = await compressImage(f, 0.25, 1000); 
+                                setNewMaintenance({...newMaintenance, image: compressed}); 
+                              } 
+                            }} 
+                          />
                         </div>
                       </div>
-                  </div>
-                ))}
+
+                      <button 
+                        type="submit" 
+                        className="w-full py-3 bg-orange-600 hover:bg-orange-700 active:scale-98 text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+                      >
+                        <Save size={16} /> บันทึกรับเรื่องแจ้งซ่อม
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="p-6 bg-gray-50 rounded-xl border border-dashed flex flex-col items-center justify-center text-gray-400 text-center">
+                      <Lock size={32} className="mb-2 opacity-50" />
+                      <p className="text-xs font-bold uppercase mt-2">สงวนสิทธิ์สำหรับ Admin</p>
+                      <p className="text-[11px] text-gray-500 mt-1">ผู้เช่าสามารถแจ้งซ่อมผ่านแท็บ "แจ้งซ่อม" ในเมนูส่วนตัว</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Maintenance Items List with Action Controls */}
+                <div className="lg:col-span-2 space-y-4">
+                  {filteredMaintenance.length === 0 ? (
+                    <div className="bg-white p-12 rounded-2xl border text-center text-gray-400 shadow-xs">
+                      <Wrench size={48} className="mx-auto mb-3 opacity-25 text-orange-500" />
+                      <h4 className="font-bold text-gray-700 text-base mb-1">ไม่พบรายการแจ้งซ่อม</h4>
+                      <p className="text-xs text-gray-400">
+                        {maintenanceSearch 
+                          ? `ไม่พบข้อมูลที่ตรงกับคำค้นหา "${maintenanceSearch}"` 
+                          : maintenanceFilter !== 'all' 
+                            ? `ไม่มีรายการในสถานะที่เลือก (${maintenanceFilter})` 
+                            : 'ยังไม่มีประวัติการแจ้งซ่อมในระบบ'}
+                      </p>
+                      {(maintenanceSearch || maintenanceFilter !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => { setMaintenanceSearch(''); setMaintenanceFilter('all'); }}
+                          className="mt-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all"
+                        >
+                          ล้างตัวกรองทั้งหมด
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    filteredMaintenance.map(m => {
+                      const isEditingThisNote = editingMaintenanceNote.id === m.id;
+                      const status = m.status || 'pending';
+
+                      return (
+                        <div key={m.id} className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col gap-4 hover:border-gray-300 transition-all">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                            {/* Photo thumbnail */}
+                            {m.image ? (
+                              <div 
+                                onClick={() => setExpandedImage(m.image)} 
+                                className="w-full sm:w-44 h-32 rounded-xl overflow-hidden shadow-xs border shrink-0 relative group cursor-zoom-in bg-gray-100"
+                                title="คลิกเพื่อดูรูปขยาย"
+                              >
+                                <img src={m.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="Issue" />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                                  <Eye size={16} /> ดูภาพเต็ม
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`w-full sm:w-24 h-24 rounded-xl flex items-center justify-center shrink-0 ${
+                                status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-100' :
+                                status === 'in_progress' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+                                'bg-green-50 text-green-600 border border-green-100'
+                              }`}>
+                                <Wrench size={32} />
+                              </div>
+                            )}
+
+                            {/* Details */}
+                            <div className="flex-1 w-full min-w-0">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-gray-100 text-gray-800 border">
+                                  <Building2 size={13} className="text-gray-500" /> ห้อง {m.roomId}
+                                </span>
+                                <span className="text-[11px] text-gray-400 font-semibold flex items-center gap-1">
+                                  <Calendar size={12} /> {m.date || 'ไม่ระบุวัน'}
+                                </span>
+                              </div>
+
+                              <h4 className="font-black text-lg text-gray-900 leading-snug break-words">
+                                {m.issue}
+                              </h4>
+
+                              {/* Admin Note / Repair Cost Display */}
+                              {(m.adminNote || m.cost > 0) && (
+                                <div className="mt-2.5 p-2.5 bg-gray-50 rounded-xl border border-gray-100 text-xs space-y-1">
+                                  {m.adminNote && (
+                                    <p className="text-gray-700 font-medium">
+                                      <strong className="text-gray-900">บันทึกของช่าง/แอดมิน:</strong> {m.adminNote}
+                                    </p>
+                                  )}
+                                  {m.cost > 0 && (
+                                    <p className="text-orange-700 font-bold">
+                                      ค่าใช้จ่ายซ่อม: {Number(m.cost).toLocaleString()} บาท
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Status Badges & Quick Switchers */}
+                              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">สถานะ:</span>
+                                  {authRole === 'admin' ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateMaintenanceStatus(m, 'pending')}
+                                        className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                                          status === 'pending'
+                                            ? 'bg-orange-600 text-white shadow-xs'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-orange-50 hover:text-orange-600'
+                                        }`}
+                                      >
+                                        รอดำเนินการ
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateMaintenanceStatus(m, 'in_progress')}
+                                        className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                                          status === 'in_progress'
+                                            ? 'bg-blue-600 text-white shadow-xs'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600'
+                                        }`}
+                                      >
+                                        กำลังซ่อม
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateMaintenanceStatus(m, 'completed')}
+                                        className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all ${
+                                          status === 'completed'
+                                            ? 'bg-green-600 text-white shadow-xs'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-green-50 hover:text-green-600'
+                                        }`}
+                                      >
+                                        ✔ ซ่อมเสร็จสิ้น
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className={`text-xs font-bold px-3 py-1 rounded-lg ${
+                                      status === 'pending' ? 'bg-orange-100 text-orange-700' :
+                                      status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                                      'bg-green-100 text-green-700'
+                                    }`}>
+                                      {status === 'pending' ? 'รอดำเนินการ' : status === 'in_progress' ? 'กำลังซ่อม' : 'ซ่อมเสร็จสิ้นแล้ว'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {authRole === 'admin' && (
+                                  <div className="flex items-center gap-1.5 ml-auto">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (isEditingThisNote) {
+                                          setEditingMaintenanceNote({ id: null, adminNote: '', cost: '' });
+                                        } else {
+                                          setEditingMaintenanceNote({
+                                            id: m.id,
+                                            adminNote: m.adminNote || '',
+                                            cost: m.cost ? String(m.cost) : ''
+                                          });
+                                        }
+                                      }}
+                                      className="px-2.5 py-1 text-xs font-bold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors flex items-center gap-1"
+                                      title="เพิ่มหรือแก้ไขบันทึกงานซ่อม"
+                                    >
+                                      📝 {isEditingThisNote ? 'ปิดหมายเหตุ' : 'บันทึกช่าง/ค่าใช้จ่าย'}
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleDeleteMaintenance(m.id)} 
+                                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" 
+                                      title="ลบรายการแจ้งซ่อม"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Inline Admin Note & Cost Editing Box */}
+                          {isEditingThisNote && authRole === 'admin' && (
+                            <div className="p-3.5 bg-blue-50/60 rounded-xl border border-blue-200 space-y-3 mt-1 animate-fadeIn">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                                  📝 จัดการบันทึกการซ่อม & ค่าใช้จ่าย (ห้อง {m.roomId})
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMaintenanceNote({ id: null, adminNote: '', cost: '' })}
+                                  className="text-xs text-gray-400 hover:text-gray-600"
+                                >
+                                  ✕ ปิด
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">
+                                    บันทึกผลการซ่อม / ช่างผู้รับผิดชอบ
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="เช่น เปลี่ยนก๊อกน้ำใหม่แล้ว, นัดช่างแอร์เข้าวันพรุ่งนี้ 10:00"
+                                    value={editingMaintenanceNote.adminNote}
+                                    onChange={(e) => setEditingMaintenanceNote({...editingMaintenanceNote, adminNote: e.target.value})}
+                                    className="w-full p-2 border rounded-lg text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">
+                                    ค่าใช้จ่ายซ่อม (บาท)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    placeholder="0"
+                                    value={editingMaintenanceNote.cost}
+                                    onChange={(e) => setEditingMaintenanceNote({...editingMaintenanceNote, cost: e.target.value})}
+                                    className="w-full p-2 border rounded-lg text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMaintenanceNote({ id: null, adminNote: '', cost: '' })}
+                                  className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-200 rounded-lg"
+                                >
+                                  ยกเลิก
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveMaintenanceNote(m)}
+                                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors"
+                                >
+                                  บันทึกข้อมูล
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'expenses' && (
           <div className="space-y-6 print:hidden">
@@ -3215,66 +3981,223 @@ const App = () => {
           </div>
         )}
 
-        {activeTab === 'contracts' && (
-            <div className="space-y-6 print:hidden">
-              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-                  <div className="p-6 border-b flex justify-between items-center bg-gray-50"><h3 className="font-black text-xl flex items-center gap-2"><ClipboardList className="text-blue-600" /> ทะเบียนสัญญาเช่า (Secure Cloud)</h3></div>
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                          <thead className="bg-white text-[10px] font-bold text-gray-400 uppercase border-b">
-                              <tr>
-                                  <th className="px-6 py-4">ผู้เช่า / เลขที่สัญญา</th>
-                                  <th className="px-6 py-4">ห้องพัก</th>
-                                  <th className="px-6 py-4">การเงิน & มัดจำ</th>
-                                  <th className="px-6 py-4">ระยะเวลาสัญญา</th>
-                                  <th className="px-6 py-4 text-right">พิมพ์สัญญา</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                              {rooms.filter(r => r.status === 'occupied').map(room => (
-                                  <tr key={`contract-${room.building}-${room.id}`} className="hover:bg-gray-50 transition-colors">
-                                      <td className="px-6 py-6">
-                                          <div className="flex items-center gap-4">
-                                              {room.idCardImage ? <img src={room.idCardImage} className="w-16 h-12 object-cover rounded border shadow-sm grayscale" /> : <div className="w-16 h-12 bg-gray-100 rounded flex items-center justify-center"><User size={24} className="text-gray-300" /></div>}
-                                              <div>
-                                                  <p className="font-black text-gray-900 text-lg">{room.tenant}</p>
-                                                  <p className="text-[10px] font-mono text-blue-600 uppercase tracking-tighter"># {room.contractId || 'N/A'}</p>
-                                              </div>
-                                          </div>
-                                      </td>
-                                      <td className="px-6 py-6"><p className="font-bold text-gray-700">ห้อง {room.id}</p><p className="text-[10px] text-gray-400">อาคาร {room.building}</p></td>
-                                      <td className="px-6 py-6"><p className="text-sm font-bold text-gray-700">มัดจำ: {parseFloat(room.deposit || 0).toLocaleString()} ฿</p><p className="text-[10px] text-orange-600 font-bold uppercase">แรกเข้า: {parseFloat(room.initialTotal || 0).toLocaleString()} ฿</p></td>
-                                      <td className="px-6 py-6"><p className="text-[10px] font-bold text-green-600 uppercase tracking-wider">เริ่ม: {room.startDate}</p><p className="text-[10px] text-gray-400">ครบกำหนด: {room.endDate || 'ไม่มีกำหนด'}</p></td>
-                                      <td className="px-6 py-6 text-right">
-                                          <button onClick={() => { setSelectedContractRoom(room); setIsContractPreviewOpen(true); }} className="p-3 text-blue-600 hover:bg-blue-50 rounded-2xl transition-all shadow-sm border border-blue-100"><FileSearch size={24} /></button>
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
+        {activeTab === 'contracts' && (() => {
+          const occupiedRooms = rooms.filter(r => r.status === 'occupied').filter(r => {
+            const matchesSearch = !contractSearch || 
+              (r.tenant && r.tenant.toLowerCase().includes(contractSearch.toLowerCase())) ||
+              (r.id && r.id.toLowerCase().includes(contractSearch.toLowerCase())) ||
+              (r.contractId && r.contractId.toLowerCase().includes(contractSearch.toLowerCase())) ||
+              (r.phone && r.phone.includes(contractSearch));
+            const matchesBld = contractBuildingFilter === 'all' || r.building === contractBuildingFilter;
+            return matchesSearch && matchesBld;
+          });
+          const allBuildings = [...new Set(rooms.map(r => r.building))].sort();
+
+          return (
+            <div className="space-y-4 sm:space-y-6 print:hidden">
+              <div className="bg-white rounded-2xl border shadow-xs overflow-hidden">
+                {/* Header Banner */}
+                <div className="p-3.5 sm:p-5 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                      <ClipboardList size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-base sm:text-xl text-gray-900 leading-tight">ทะเบียนสัญญาเช่า (Secure Cloud)</h3>
+                      <p className="text-[11px] sm:text-xs text-gray-400">สัญญาเช่าที่พักอาศัยที่มีผลบังคับใช้ทั้งหมด ({occupiedRooms.length} ฉบับ)</p>
+                    </div>
                   </div>
+                </div>
+
+                {/* Search & Filter Toolbar */}
+                <div className="p-3 sm:p-4 border-b bg-white flex flex-col sm:flex-row gap-2.5 sm:gap-3">
+                  <div className="relative flex-1">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input 
+                      type="text" 
+                      placeholder="ค้นหาชื่อผู้เช่า, เลขห้อง, เลขสัญญา, เบอร์โทร..." 
+                      value={contractSearch} 
+                      onChange={e => setContractSearch(e.target.value)} 
+                      className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm border rounded-xl bg-gray-50/70 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                    />
+                  </div>
+                  <select 
+                    value={contractBuildingFilter} 
+                    onChange={e => setContractBuildingFilter(e.target.value)} 
+                    className="py-2 px-3 text-xs sm:text-sm border rounded-xl bg-gray-50/70 font-bold text-gray-700 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="all">ทุกอาคาร ({rooms.filter(r => r.status === 'occupied').length})</option>
+                    {allBuildings.map(bld => <option key={bld} value={bld}>อาคาร {bld}</option>)}
+                  </select>
+                </div>
+
+                {occupiedRooms.length === 0 ? (
+                  <div className="p-8 sm:p-12 text-center text-gray-400">
+                    <ClipboardList size={40} className="mx-auto mb-2 text-gray-300" />
+                    <h4 className="font-bold text-sm text-gray-600 mb-0.5">ไม่พบข้อมูลสัญญาเช่า</h4>
+                    <p className="text-xs text-gray-400">ยังไม่มีผู้เช่าที่มีสัญญาเช่าตรงกับเงื่อนไขการค้นหา</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Mobile Card View (block md:hidden) */}
+                    <div className="block md:hidden p-2.5 sm:p-3 space-y-2.5">
+                      {occupiedRooms.map(room => (
+                        <div 
+                          key={`contract-card-${room.building}-${room.id}`} 
+                          className="bg-white p-3.5 rounded-xl border border-gray-200/90 shadow-xs space-y-3 hover:border-blue-200 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              {room.idCardImage ? (
+                                <img 
+                                  src={room.idCardImage} 
+                                  onClick={() => setExpandedImage(room.idCardImage)}
+                                  className="w-14 h-10 object-cover rounded-lg border shadow-xs grayscale cursor-pointer hover:opacity-80 shrink-0" 
+                                  title="คลิกเพื่อดูรูปบัตรขนาดเต็ม"
+                                  alt="ID Card"
+                                />
+                              ) : (
+                                <div className="w-14 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0 border border-gray-200">
+                                  <User size={20} className="text-gray-300" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <h4 className="font-black text-gray-900 text-sm sm:text-base leading-tight truncate">{room.tenant}</h4>
+                                <span className="inline-block mt-0.5 text-[10px] font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 uppercase tracking-tight">
+                                  # {room.contractId || 'N/A'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="px-2.5 py-1 rounded-xl bg-gray-900 text-white text-xs font-black shadow-xs inline-block">
+                                ห้อง {room.id}
+                              </span>
+                              <span className="text-[10px] text-gray-400 font-bold block mt-0.5">อาคาร {room.building}</span>
+                            </div>
+                          </div>
+
+                          {/* Quick details 2x2 grid */}
+                          <div className="grid grid-cols-2 gap-2 text-xs bg-gray-50/80 p-2.5 rounded-xl border border-gray-100">
+                            <div>
+                              <span className="text-[10px] text-gray-400 block font-semibold">เงินมัดจำ</span>
+                              <span className="font-bold text-gray-800">{parseFloat(room.deposit || 0).toLocaleString()} ฿</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-orange-500 block font-semibold">ยอดจ่ายแรกเข้า</span>
+                              <span className="font-bold text-orange-700">{parseFloat(room.initialTotal || 0).toLocaleString()} ฿</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-green-600 block font-semibold">เริ่มสัญญา</span>
+                              <span className="font-bold text-gray-700">{room.startDate || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-gray-400 block font-semibold">ครบกำหนด</span>
+                              <span className="font-bold text-gray-700">{room.endDate || 'ไม่มีกำหนด'}</span>
+                            </div>
+                          </div>
+
+                          {/* Action Button */}
+                          <button 
+                            onClick={() => { setSelectedContractRoom(room); setIsContractPreviewOpen(true); }}
+                            className="w-full py-2.5 px-3 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-200 hover:border-transparent transition-all active:scale-[0.98]"
+                          >
+                            <FileSearch size={16} /> ดูและพิมพ์หนังสือสัญญาเช่า
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Desktop Table View (hidden md:block) */}
+                    <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50/70 text-[11px] font-bold text-gray-400 uppercase border-b">
+                                <tr>
+                                    <th className="px-4 lg:px-6 py-3.5">ผู้เช่า / เลขที่สัญญา</th>
+                                    <th className="px-4 lg:px-6 py-3.5">ห้องพัก</th>
+                                    <th className="px-4 lg:px-6 py-3.5">การเงิน & มัดจำ</th>
+                                    <th className="px-4 lg:px-6 py-3.5">ระยะเวลาสัญญา</th>
+                                    <th className="px-4 lg:px-6 py-3.5 text-right">พิมพ์สัญญา</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {occupiedRooms.map(room => (
+                                    <tr key={`contract-${room.building}-${room.id}`} className="hover:bg-blue-50/30 transition-colors">
+                                        <td className="px-4 lg:px-6 py-4">
+                                            <div className="flex items-center gap-3 lg:gap-4">
+                                                {room.idCardImage ? (
+                                                  <img 
+                                                    src={room.idCardImage} 
+                                                    onClick={() => setExpandedImage(room.idCardImage)}
+                                                    className="w-14 lg:w-16 h-10 lg:h-12 object-cover rounded border shadow-xs grayscale cursor-pointer hover:opacity-80" 
+                                                    title="คลิกเพื่อดูรูปบัตรขนาดเต็ม"
+                                                    alt="ID Card"
+                                                  />
+                                                ) : (
+                                                  <div className="w-14 lg:w-16 h-10 lg:h-12 bg-gray-100 rounded flex items-center justify-center border border-gray-200">
+                                                    <User size={22} className="text-gray-300" />
+                                                  </div>
+                                                )}
+                                                <div>
+                                                    <p className="font-black text-gray-900 text-sm lg:text-base">{room.tenant}</p>
+                                                    <p className="text-[10px] font-mono text-blue-600 uppercase tracking-tighter"># {room.contractId || 'N/A'}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 lg:px-6 py-4">
+                                          <p className="font-bold text-gray-800 text-sm">ห้อง {room.id}</p>
+                                          <p className="text-[10px] text-gray-400">อาคาร {room.building}</p>
+                                        </td>
+                                        <td className="px-4 lg:px-6 py-4">
+                                          <p className="text-xs lg:text-sm font-bold text-gray-700">มัดจำ: {parseFloat(room.deposit || 0).toLocaleString()} ฿</p>
+                                          <p className="text-[10px] text-orange-600 font-bold uppercase">แรกเข้า: {parseFloat(room.initialTotal || 0).toLocaleString()} ฿</p>
+                                        </td>
+                                        <td className="px-4 lg:px-6 py-4">
+                                          <p className="text-[10px] font-bold text-green-600 uppercase tracking-wider">เริ่ม: {room.startDate}</p>
+                                          <p className="text-[10px] text-gray-400">ครบกำหนด: {room.endDate || 'ไม่มีกำหนด'}</p>
+                                        </td>
+                                        <td className="px-4 lg:px-6 py-4 text-right">
+                                            <button 
+                                              onClick={() => { setSelectedContractRoom(room); setIsContractPreviewOpen(true); }} 
+                                              className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all shadow-xs border border-blue-100 active:scale-95"
+                                              title="ดูและพิมพ์สัญญาเช่า"
+                                            >
+                                              <FileSearch size={20} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-        )}
+          );
+        })()}
 
         {/* --- Tenant Views --- */}
         {activeTab === 'tenant_dashboard' && loggedInRoom && (
-            <div className="space-y-6">
-                <div className="bg-white p-8 rounded-3xl border shadow-sm flex items-center justify-between">
+            <div className="space-y-4 sm:space-y-6">
+                <div className="bg-white p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl border shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
-                        <h2 className="text-3xl font-black mb-2">ยินดีต้อนรับ, {loggedInRoom.tenant}</h2>
-                        <p className="text-gray-500 flex items-center gap-2"><Building2 size={16} /> ห้อง {loggedInRoom.id} (อาคาร {loggedInRoom.building})</p>
+                        <h2 className="text-xl sm:text-2xl md:text-3xl font-black mb-1">ยินดีต้อนรับ, {loggedInRoom.tenant}</h2>
+                        <p className="text-xs sm:text-sm font-bold text-gray-700">{billConfig.dormName}</p>
+                        {billConfig.slogan && (
+                          <p className="text-xs font-semibold text-blue-600 italic mb-1.5">"{billConfig.slogan}"</p>
+                        )}
+                        <p className="text-gray-500 flex items-center gap-1.5 text-xs sm:text-sm"><Building2 size={16} /> ห้อง {loggedInRoom.id} (อาคาร {loggedInRoom.building})</p>
                     </div>
                 </div>
 
                 {tenantUnpaidBills.length > 0 && (
-                    <div className="bg-gradient-to-r from-red-50 to-orange-50 p-6 rounded-3xl border border-red-100 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="bg-gradient-to-r from-red-50 to-orange-50 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-red-100 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                         <div className="space-y-1">
                             <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-red-100 text-red-600 animate-pulse">สถานะ: ค้างชำระหอพัก</span>
-                            <h3 className="font-black text-xl text-gray-950 mt-2">โปรดทราบ: มีบิลค้างชำระในระบบ</h3>
-                            <p className="text-sm text-gray-600 font-medium font-sans">กรุณากดชำระเงินและแนบหลักฐานสลิปการโอนเงินผ่านทางหน้าเมนูล่างนี้เพื่อแจ้งผู้ควบคุมระบบ</p>
+                            <h3 className="font-black text-lg sm:text-xl text-gray-950 mt-1 sm:mt-2">โปรดทราบ: มีบิลค้างชำระในระบบ</h3>
+                            <p className="text-xs sm:text-sm text-gray-600 font-medium font-sans">กรุณากดชำระเงินและแนบหลักฐานสลิปการโอนเงินผ่านทางหน้าเมนูล่างนี้เพื่อแจ้งผู้ควบคุมระบบ</p>
                         </div>
-                        <button onClick={() => setActiveTab('tenant_bills')} className="w-full md:w-auto px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-sm transition shadow-md active:scale-95 shrink-0">
+                        <button onClick={() => setActiveTab('tenant_bills')} className="w-full md:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs sm:text-sm transition shadow-md active:scale-95 shrink-0">
                             คลิกที่นี่เพื่อไปดูรายละเอียด & จ่ายเงิน
                         </button>
                     </div>
