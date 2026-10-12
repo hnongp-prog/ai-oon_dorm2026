@@ -21,6 +21,9 @@ service cloud.firestore {
       match /config/{configId} {
         allow read, write: if true;
       }
+      match /announcements/{announcementId} {
+        allow read, write: if true;
+      }
     }
   }
 }

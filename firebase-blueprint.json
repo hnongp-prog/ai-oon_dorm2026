@@ -113,6 +113,23 @@
           "elecRate": { "type": "number" },
           "waterRate": { "type": "number" }
        }
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Public notice or bulletin for all tenants with auto expiration date",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string", "enum": ["water", "electricity", "maintenance", "general", "urgent"] },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "author": { "type": "string" },
+        "isPinned": { "type": "boolean" }
+      },
+      "required": ["id", "title", "content", "endDate", "createdAt"]
     }
   },
   "firestore": {
@@ -139,6 +156,10 @@
     "/artifacts/{appId}/public/data/config/rates": {
        "schema": { "$ref": "#/entities/RatesConfig" },
        "description": "Utility rates configuration."
+    },
+    "/artifacts/{appId}/public/data/announcements/{announcementId}": {
+       "schema": { "$ref": "#/entities/Announcement" },
+       "description": "Stores announcements and notices with expiration date."
     }
   }
 }

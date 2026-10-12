@@ -6,7 +6,7 @@ import {
   Calculator, Clock, CheckCircle, Receipt, Wallet, Upload, Eye, Settings, 
   QrCode, MapPin, TrendingUp, Calendar, Camera, ClipboardList, User, FileSearch, 
   AlertTriangle, Gavel, Lock, BadgeCheck, History, Send, ImagePlus, Menu, Key, ChevronRight,
-  Sparkles, Loader2, Filter, Check, Quote
+  Sparkles, Loader2, Filter, Check, Quote, Megaphone, Bell
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 
@@ -183,17 +183,40 @@ const App = () => {
   const [bills, setBills] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [maintenance, setMaintenance] = useState([]);
-  const [billConfig, setBillConfig] = useState({
-    dormName: 'DormManager Residence',
-    slogan: 'อบอุ่น ปลอดภัย สะดวกสบาย เหมือนบ้านคุณ',
-    address: '123/45 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110',
-    phone: '02-123-4567',
-    taxId: '0-1234-56789-01-2',
-    bankName: 'ธนาคารกสิกรไทย',
-    accountNumber: '012-3-45678-9',
-    accountName: 'บจก. ดอร์ม แมเนเจอร์ (ประเทศไทย)',
-    logoUrl: 'https://images.unsplash.com/photo-1590381105924-c72589b9ef3f?auto=format&fit=crop&q=80&w=200',
-    qrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=DormManagerPayment' 
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<any>(null);
+  const [newAnnouncement, setNewAnnouncement] = useState({
+    title: '',
+    content: '',
+    category: 'water' as 'water' | 'electricity' | 'maintenance' | 'general' | 'urgent',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    isPinned: false
+  });
+  const [announcementFilter, setAnnouncementFilter] = useState<'all' | 'active' | 'expired'>('active');
+  const [isConfigLoaded, setIsConfigLoaded] = useState(() => {
+    return !!localStorage.getItem('cached_bill_config');
+  });
+  const [billConfig, setBillConfig] = useState(() => {
+    try {
+      const cached = localStorage.getItem('cached_bill_config');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {
+      // ignore
+    }
+    return {
+      dormName: '',
+      slogan: '',
+      address: '',
+      phone: '',
+      taxId: '',
+      bankName: '',
+      accountNumber: '',
+      accountName: '',
+      logoUrl: '',
+      qrCodeUrl: ''
+    };
   });
   const [rates, setRates] = useState({ elecRate: 8, waterRate: 18, waterBillingType: 'unit', waterFixedRate: 150 });
 
@@ -367,15 +390,35 @@ const App = () => {
     }, (err) => console.error(err));
 
     const unsubConfig = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
-      if (docSnap.exists()) setBillConfig(prev => ({ ...prev, ...docSnap.data() }));
-    }, (err) => console.error(err));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setBillConfig(prev => {
+          const updated = { ...prev, ...data };
+          try {
+            localStorage.setItem('cached_bill_config', JSON.stringify(updated));
+          } catch (e) {
+            // ignore
+          }
+          return updated;
+        });
+      }
+      setIsConfigLoaded(true);
+    }, (err) => {
+      console.error(err);
+      setIsConfigLoaded(true);
+    });
 
     const unsubRates = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'rates'), (docSnap) => {
       if (docSnap.exists()) setRates(docSnap.data());
     }, (err) => console.error(err));
 
+    const unsubAnnouncements = onSnapshot(publicPath('announcements'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAnnouncements(data.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
+    }, (err) => console.error("Error fetching announcements:", err));
+
     return () => {
-      unsubRooms(); unsubBills(); unsubExpenses(); unsubMaintenance(); unsubConfig(); unsubRates();
+      unsubRooms(); unsubBills(); unsubExpenses(); unsubMaintenance(); unsubConfig(); unsubRates(); unsubAnnouncements();
     };
   }, [user]);
 
@@ -404,6 +447,135 @@ const App = () => {
     return bills.filter(b => b.roomId === loggedInRoom.id && b.building === loggedInRoom.building && b.status === 'unpaid');
   }, [authRole, loggedInRoom, bills]);
 
+  // Active Announcements (automatically filters out expired ones based on current date)
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  
+  const activeAnnouncements = useMemo(() => {
+    return announcements
+      .filter((a: any) => {
+        if (!a.endDate) return true;
+        // Notice is active if endDate >= todayStr
+        return a.endDate >= todayStr;
+      })
+      .sort((a: any, b: any) => {
+        // Pinned first, then newest
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+  }, [announcements, todayStr]);
+
+  // --- Announcement Handlers ---
+  const handleSaveAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const announcementId = editingAnnouncement ? editingAnnouncement.id : `ann_${Date.now()}`;
+      const announcementData = {
+        title: newAnnouncement.title.trim(),
+        content: newAnnouncement.content.trim(),
+        category: newAnnouncement.category,
+        startDate: newAnnouncement.startDate || todayStr,
+        endDate: newAnnouncement.endDate,
+        createdAt: editingAnnouncement?.createdAt || new Date().toISOString(),
+        author: authRole === 'admin' ? 'ผู้ดูแลหอพัก (Admin)' : 'เจ้าหน้าที่',
+        isPinned: !!newAnnouncement.isPinned
+      };
+
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'announcements', announcementId), announcementData);
+      setIsAnnouncementModalOpen(false);
+      setEditingAnnouncement(null);
+      setNewAnnouncement({
+        title: '',
+        content: '',
+        category: 'water',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        isPinned: false
+      });
+    } catch (err: any) {
+      console.error("Error saving announcement:", err);
+      alert("เกิดข้อผิดพลาดในการบันทึกประกาศ: " + err.message);
+    }
+  };
+
+  const handleDeleteAnnouncement = (id: string, title: string) => {
+    triggerConfirm(
+      "ลบประกาศนี้?",
+      `คุณต้องการลบประกาศ "${title}" ออกจากระบบใช่หรือไม่?`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'announcements', id));
+        } catch (err: any) {
+          console.error("Error deleting announcement:", err);
+          alert("ไม่สามารถลบประกาศได้: " + err.message);
+        }
+      },
+      true
+    );
+  };
+
+  // Helper for Category styling & labels
+  const getAnnouncementCategoryBadge = (cat: string) => {
+    switch (cat) {
+      case 'water':
+        return { label: 'น้ำประปา', bg: 'bg-cyan-100 text-cyan-800 border-cyan-200', icon: Droplets, lightBg: 'from-cyan-500/10 via-blue-500/5 to-white' };
+      case 'electricity':
+        return { label: 'ไฟฟ้า', bg: 'bg-amber-100 text-amber-800 border-amber-200', icon: Zap, lightBg: 'from-amber-500/10 via-yellow-500/5 to-white' };
+      case 'maintenance':
+        return { label: 'งานซ่อมบำรุง', bg: 'bg-purple-100 text-purple-800 border-purple-200', icon: Wrench, lightBg: 'from-purple-500/10 via-indigo-500/5 to-white' };
+      case 'urgent':
+        return { label: 'ด่วนมาก', bg: 'bg-rose-100 text-rose-800 border-rose-200 animate-pulse', icon: AlertTriangle, lightBg: 'from-rose-500/15 via-red-500/5 to-white' };
+      case 'general':
+      default:
+        return { label: 'ข่าวสารทั่วไป', bg: 'bg-blue-100 text-blue-800 border-blue-200', icon: Megaphone, lightBg: 'from-blue-500/10 via-slate-500/5 to-white' };
+    }
+  };
+
+  // Quick preset templates for admin convenience
+  const applyAnnouncementTemplate = (type: 'water' | 'electric' | 'clean' | 'holiday') => {
+    const today = new Date().toISOString().split('T')[0];
+    const twoDaysLater = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const nextDay = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    if (type === 'water') {
+      setNewAnnouncement({
+        title: 'แจ้งการตัดน้ำประปาชั่วคราวเพื่อซ่อมบำรุงท่อส่งน้ำ',
+        content: 'เรียนผู้เช่าทุกท่าน ทางหอพักขอแจ้งงดจ่ายน้ำประปาชั่วคราวเพื่อทำการล้างถังพักน้ำและตรวจสอบระบบท่อประปา ขอให้ทุกท่านสำรองน้ำไว้ใช้ล่วงหน้า ขออภัยในความไม่สะดวกเป็นอย่างยิ่งครับ',
+        category: 'water',
+        startDate: today,
+        endDate: nextDay,
+        isPinned: true
+      });
+    } else if (type === 'electric') {
+      setNewAnnouncement({
+        title: 'แจ้งดับกระแสไฟฟ้าชั่วคราวเพื่อตรวจเช็กตู้ควบคุมไฟ',
+        content: 'เรียนผู้เช่าทุกท่าน การไฟฟ้านครหลวง/หอพัก จะดำเนินการซ่อมบำรุงและสับเปลี่ยนอุปกรณ์ระบบไฟฟ้า ทำให้จำเป็นต้องดับกระแสไฟฟ้าชั่วคราว จึงขอแจ้งให้ผู้เช่าทุกท่านทราบล่วงหน้าครับ',
+        category: 'electricity',
+        startDate: today,
+        endDate: nextDay,
+        isPinned: true
+      });
+    } else if (type === 'clean') {
+      setNewAnnouncement({
+        title: 'แจ้งทำความสะอาดและฉีดพ่นฆ่าเชื้อพื้นที่ส่วนกลาง',
+        content: 'แม่บ้านและเจ้าหน้าที่จะเข้าทำความสะอาดบริเวณทางเดิน โถงบันได และลานจอดรถ ขอความร่วมมืออย่าวางสิ่งของกีดขวางทางเดินส่วนกลาง ขอบคุณครับ',
+        category: 'maintenance',
+        startDate: today,
+        endDate: twoDaysLater,
+        isPinned: false
+      });
+    } else if (type === 'holiday') {
+      setNewAnnouncement({
+        title: 'แจ้งวันหยุดทำการสำนักงานหอพักช่วงเทศกาล',
+        content: 'สำนักงานหอพักจะปิดทำการชั่วคราว หากมีเหตุฉุกเฉินหรือประสงค์แจ้งซ่อมเร่งด่วน สามารถติดต่อผู้ดูแลได้ที่เบอร์โทรศัพท์ประจำหอพักตามปกติครับ',
+        category: 'general',
+        startDate: today,
+        endDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        isPinned: false
+      });
+    }
+  };
+
   // --- Handlers ---
   const saveRoom = async (roomData) => {
     try {
@@ -417,6 +589,11 @@ const App = () => {
 
   const handleUpdateConfig = async (newConf) => {
     setBillConfig(newConf);
+    try {
+      localStorage.setItem('cached_bill_config', JSON.stringify(newConf));
+    } catch (e) {
+      // ignore
+    }
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), newConf);
   };
 
@@ -1096,8 +1273,12 @@ const App = () => {
       <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-6 bg-gradient-to-br from-gray-100 via-gray-50 to-blue-50/30 font-sans">
         <div className="bg-white p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-3xl shadow-xl w-full max-w-sm sm:max-w-md border border-gray-100">
           <div className="text-center mb-6 sm:mb-8">
-            {billConfig.logoUrl ? (
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-white shadow-lg shadow-blue-500/15 border-2 border-gray-100 p-1.5 overflow-hidden">
+            {!isConfigLoaded ? (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-gray-50 border-2 border-gray-100 animate-pulse text-blue-500">
+                <Building2 size={28} className="sm:w-8 sm:h-8 opacity-40 animate-pulse" />
+              </div>
+            ) : billConfig.logoUrl ? (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-white shadow-lg shadow-blue-500/15 border-2 border-gray-100 p-1.5 overflow-hidden transition-all duration-300">
                 <img 
                   src={billConfig.logoUrl} 
                   alt={billConfig.dormName || 'Logo'} 
@@ -1110,7 +1291,9 @@ const App = () => {
                 <Building2 size={28} className="sm:w-8 sm:h-8" />
               </div>
             )}
-            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">{billConfig.dormName || 'DormManager'}</h1>
+            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              {billConfig.dormName || (isConfigLoaded ? 'หอพัก' : 'กำลังโหลด...')}
+            </h1>
             {billConfig.slogan && (
               <p className="text-xs sm:text-sm text-blue-600 font-semibold mt-1 italic tracking-tight">"{billConfig.slogan}"</p>
             )}
@@ -1325,11 +1508,23 @@ const App = () => {
                 label="จัดการแจ้งซ่อม/ปัญหา" 
                 badge={maintenance.filter(m => m.status === 'pending').length > 0 ? maintenance.filter(m => m.status === 'pending').length : null} 
               />
+              <SidebarItem 
+                id="announcements" 
+                icon={Megaphone} 
+                label="แจ้งข่าว/ประกาศ" 
+                badge={activeAnnouncements.length > 0 ? activeAnnouncements.length : null} 
+              />
             </>
           )}
           {authRole === 'tenant' && (
              <>
                <SidebarItem id="tenant_dashboard" icon={User} label="ข้อมูลห้องพักของฉัน" badge={tenantUnpaidBills.length > 0 ? 'แจ้งเตือน' : null} />
+               <SidebarItem 
+                 id="tenant_announcements" 
+                 icon={Megaphone} 
+                 label="ข่าวสาร/ประกาศ" 
+                 badge={activeAnnouncements.length > 0 ? activeAnnouncements.length : null} 
+               />
                <SidebarItem id="tenant_bills" icon={FileText} label="บิลค่าเช่า/มิเตอร์" badge={tenantUnpaidBills.length > 0 ? tenantUnpaidBills.length : null} />
                <SidebarItem id="tenant_maintenance" icon={Wrench} label="แจ้งซ่อม" />
              </>
@@ -2225,21 +2420,98 @@ const App = () => {
         )}
 
         <header className="mb-4 sm:mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 print:hidden">
-          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-gray-900 leading-tight">
-            {activeTab === 'dashboard' && 'แดชบอร์ดสรุปผล (Real-time)'}
-            {activeTab === 'rooms' && 'ผังห้องพักรายตึก'}
-            {activeTab === 'billing' && 'คำนวณค่าเช่า/มิเตอร์'}
-            {activeTab === 'billDesign' && 'ตั้งค่าใบแจ้งหนี้'}
-            {activeTab === 'expenses' && 'บันทึกรายจ่ายหอพัก'}
-            {activeTab === 'maintenance' && 'จัดการงานแจ้งซ่อม'}
-            {activeTab === 'contracts' && 'ทะเบียนสัญญาเช่า'}
-          </h1>
-          {activeTab === 'rooms' && authRole === 'admin' && (
-            <button onClick={() => setIsAddModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-all w-full sm:w-auto">
-              <Plus size={18} /> เพิ่มตึก/ห้อง
-            </button>
-          )}
+          <div>
+            <h1 className="text-lg sm:text-xl md:text-2xl font-black text-gray-900 leading-tight">
+              {activeTab === 'dashboard' && 'แดชบอร์ดสรุปผล (Real-time)'}
+              {activeTab === 'rooms' && 'ผังห้องพักรายตึก'}
+              {activeTab === 'billing' && 'คำนวณค่าเช่า/มิเตอร์'}
+              {activeTab === 'billDesign' && 'ตั้งค่าใบแจ้งหนี้'}
+              {activeTab === 'expenses' && 'บันทึกรายจ่ายหอพัก'}
+              {activeTab === 'maintenance' && 'จัดการงานแจ้งซ่อม'}
+              {activeTab === 'contracts' && 'ทะเบียนสัญญาเช่า'}
+              {activeTab === 'announcements' && 'ระบบแจ้งข่าวสารและประกาศ (Announcements)'}
+              {activeTab === 'tenant_announcements' && 'ข่าวสารและประกาศจากหอพัก'}
+            </h1>
+            {activeTab === 'announcements' && (
+              <p className="text-xs text-gray-500 mt-1">กระจายข่าวสารให้ผู้เช่าทุกคนรับทราบ พร้อมระบบกำหนดวันหมดอายุอัตโนมัติ (เช่น แจ้งน้ำไม่ไหล, ไฟดับ, ซ่อมบำรุง)</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeTab === 'rooms' && authRole === 'admin' && (
+              <button onClick={() => setIsAddModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-all w-full sm:w-auto">
+                <Plus size={18} /> เพิ่มตึก/ห้อง
+              </button>
+            )}
+            {activeTab === 'announcements' && authRole === 'admin' && (
+              <button 
+                onClick={() => {
+                  setEditingAnnouncement(null);
+                  setNewAnnouncement({
+                    title: '',
+                    content: '',
+                    category: 'water',
+                    startDate: new Date().toISOString().split('T')[0],
+                    endDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                    isPinned: false
+                  });
+                  setIsAnnouncementModalOpen(true);
+                }} 
+                className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-all w-full sm:w-auto"
+              >
+                <Plus size={18} /> สร้างประกาศใหม่
+              </button>
+            )}
+          </div>
         </header>
+
+        {/* Global Urgent/Active Announcement Broadcast Bar for Tenants & Admin */}
+        {activeAnnouncements.length > 0 && activeTab !== 'announcements' && activeTab !== 'tenant_announcements' && (
+          <div className="mb-5 sm:mb-6 space-y-2.5 print:hidden">
+            {activeAnnouncements.slice(0, 2).map((ann: any) => {
+              const badge = getAnnouncementCategoryBadge(ann.category);
+              const CategoryIcon = badge.icon;
+              return (
+                <div 
+                  key={ann.id}
+                  className={`p-3.5 sm:p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gradient-to-r ${badge.lightBg} border-blue-200/80 transition-all`}
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="p-2 sm:p-2.5 rounded-xl bg-white shadow-xs border border-gray-200/80 text-blue-600 shrink-0 mt-0.5">
+                      <CategoryIcon size={20} className={ann.category === 'urgent' ? 'text-rose-600 animate-pulse' : 'text-blue-600'} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border uppercase tracking-wider ${badge.bg}`}>
+                          {badge.label}
+                        </span>
+                        {ann.isPinned && (
+                          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            📌 ปักหมุด
+                          </span>
+                        )}
+                        <span className="text-[11px] text-gray-500 font-medium">
+                          ปิดประกาศ: <strong className="text-gray-700">{ann.endDate}</strong> (จะซ่อนอัตโนมัติเมื่อครบกำหนด)
+                        </span>
+                      </div>
+                      <h4 className="font-black text-sm sm:text-base text-gray-900 leading-snug truncate">
+                        {ann.title}
+                      </h4>
+                      <p className="text-xs text-gray-600 line-clamp-2 mt-0.5 leading-relaxed">
+                        {ann.content}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab(authRole === 'admin' ? 'announcements' : 'tenant_announcements')}
+                    className="self-end sm:self-center px-3.5 py-1.5 rounded-xl bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 text-xs font-bold shadow-2xs hover:text-blue-600 transition shrink-0 whitespace-nowrap"
+                  >
+                    ดูประกาศทั้งหมด ({activeAnnouncements.length})
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {authRole === 'tenant' && tenantUnpaidBills.length > 0 && (
           <div className="mb-6 sm:mb-8 p-4 sm:p-5 bg-red-50 border border-red-200 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm animate-pulse print:hidden">
@@ -4259,6 +4531,51 @@ const App = () => {
                     </div>
                 </div>
 
+                {/* Active Announcements Card for Tenant */}
+                {activeAnnouncements.length > 0 && (
+                  <div className="bg-white rounded-2xl sm:rounded-3xl border border-blue-100 shadow-xs p-4 sm:p-6 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-blue-600">
+                        <Megaphone size={20} />
+                        <h3 className="font-black text-base sm:text-lg text-gray-900">ประกาศและข่าวสารจากหอพัก</h3>
+                      </div>
+                      <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full border border-blue-200">
+                        {activeAnnouncements.length} ประกาศล่าสุด
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {activeAnnouncements.map((ann: any) => {
+                        const badge = getAnnouncementCategoryBadge(ann.category);
+                        const CategoryIcon = badge.icon;
+                        return (
+                          <div 
+                            key={`dash-ann-${ann.id}`}
+                            className={`p-4 rounded-2xl border transition hover:shadow-xs bg-gradient-to-br ${badge.lightBg} border-gray-200`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border uppercase tracking-wider flex items-center gap-1 ${badge.bg}`}>
+                                <CategoryIcon size={12} />
+                                {badge.label}
+                              </span>
+                              <span className="text-[11px] font-semibold text-gray-500">
+                                กำหนดปิด: <span className="text-gray-800 font-bold">{ann.endDate}</span>
+                              </span>
+                            </div>
+                            <h4 className="font-black text-sm text-gray-900 mb-1.5 flex items-center gap-1.5">
+                              {ann.isPinned && <span>📌</span>}
+                              {ann.title}
+                            </h4>
+                            <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed line-clamp-4">
+                              {ann.content}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {tenantUnpaidBills.length > 0 && (
                     <div className="bg-gradient-to-r from-red-50 to-orange-50 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-red-100 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                         <div className="space-y-1">
@@ -4406,7 +4723,414 @@ const App = () => {
               </div>
             </div>
         )}
+
+        {/* --- Announcements View (Admin & Tenant) --- */}
+        {(activeTab === 'announcements' || activeTab === 'tenant_announcements') && (
+          <div className="space-y-4 sm:space-y-6 print:hidden">
+            {/* Announcement Management Header & Summary */}
+            <div className="bg-white rounded-2xl sm:rounded-3xl border shadow-xs p-4 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Megaphone size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-black text-gray-900 leading-tight">
+                    {authRole === 'admin' ? 'ศูนย์แจ้งข่าวสารและประกาศหอพัก' : 'กระดานข่าวสารและประกาศจากหอพัก'}
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {authRole === 'admin' 
+                      ? 'ประกาศที่หมดอายุ (เกินวันที่ปิดประกาศ) จะถูกซ่อนออกจากหน้าผู้เช่าอัตโนมัติ' 
+                      : 'ติดตามข่าวสาร น้ำประปา ไฟฟ้า การซ่อมแซม และข้อความสำคัญจากผู้ดูแลหอพัก'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status counter & filter */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex bg-gray-100 p-1 rounded-xl text-xs font-bold text-gray-600">
+                  <button
+                    onClick={() => setAnnouncementFilter('active')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${announcementFilter === 'active' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-gray-900'}`}
+                  >
+                    กำลังประกาศ ({activeAnnouncements.length})
+                  </button>
+                  {authRole === 'admin' && (
+                    <>
+                      <button
+                        onClick={() => setAnnouncementFilter('expired')}
+                        className={`px-3 py-1.5 rounded-lg transition-all ${announcementFilter === 'expired' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-gray-900'}`}
+                      >
+                        ปิด/หมดอายุแล้ว ({announcements.filter((a: any) => a.endDate && a.endDate < todayStr).length})
+                      </button>
+                      <button
+                        onClick={() => setAnnouncementFilter('all')}
+                        className={`px-3 py-1.5 rounded-lg transition-all ${announcementFilter === 'all' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-gray-900'}`}
+                      >
+                        ทั้งหมด ({announcements.length})
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {authRole === 'admin' && (
+                  <button
+                    onClick={() => {
+                      setEditingAnnouncement(null);
+                      setNewAnnouncement({
+                        title: '',
+                        content: '',
+                        category: 'water',
+                        startDate: new Date().toISOString().split('T')[0],
+                        endDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                        isPinned: false
+                      });
+                      setIsAnnouncementModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm flex items-center gap-1.5 transition ml-auto md:ml-0"
+                  >
+                    <Plus size={16} /> ประกาศใหม่
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Templates for Admin */}
+            {authRole === 'admin' && (
+              <div className="bg-gradient-to-r from-blue-50/60 via-indigo-50/40 to-white rounded-2xl border border-blue-100 p-3.5 sm:p-4">
+                <span className="text-[11px] font-black uppercase text-blue-800 tracking-wider block mb-2">
+                  ⚡ สร้างประกาศด่วนจากแม่แบบสำเร็จรูป (คลิกสร้างทันที):
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { applyAnnouncementTemplate('water'); setIsAnnouncementModalOpen(true); }}
+                    className="px-3 py-1.5 bg-white hover:bg-cyan-50 border border-cyan-200 text-cyan-800 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition"
+                  >
+                    <Droplets size={14} className="text-cyan-600" /> แจ้งตัดน้ำประปา
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { applyAnnouncementTemplate('electric'); setIsAnnouncementModalOpen(true); }}
+                    className="px-3 py-1.5 bg-white hover:bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition"
+                  >
+                    <Zap size={14} className="text-amber-600" /> แจ้งดับไฟฟ้าชั่วคราว
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { applyAnnouncementTemplate('clean'); setIsAnnouncementModalOpen(true); }}
+                    className="px-3 py-1.5 bg-white hover:bg-purple-50 border border-purple-200 text-purple-800 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition"
+                  >
+                    <Wrench size={14} className="text-purple-600" /> ทำความสะอาดพื้นที่ส่วนกลาง
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { applyAnnouncementTemplate('holiday'); setIsAnnouncementModalOpen(true); }}
+                    className="px-3 py-1.5 bg-white hover:bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition"
+                  >
+                    <Calendar size={14} className="text-blue-600" /> แจ้งวันหยุดเทศกาล
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Announcement List */}
+            {(() => {
+              const displayList = announcements.filter((a: any) => {
+                const isExpired = a.endDate && a.endDate < todayStr;
+                if (authRole === 'tenant') {
+                  // Tenants only see active announcements
+                  return !isExpired;
+                }
+                if (announcementFilter === 'active') return !isExpired;
+                if (announcementFilter === 'expired') return isExpired;
+                return true;
+              }).sort((a: any, b: any) => {
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+              });
+
+              if (displayList.length === 0) {
+                return (
+                  <div className="bg-white rounded-2xl sm:rounded-3xl border border-dashed border-gray-300 p-8 sm:p-12 text-center text-gray-400 space-y-3">
+                    <div className="w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center mx-auto text-gray-300">
+                      <Megaphone size={32} />
+                    </div>
+                    <h3 className="font-bold text-base text-gray-700">ไม่มีประกาศในหมวดนี้</h3>
+                    <p className="text-xs text-gray-400 max-w-sm mx-auto">
+                      {announcementFilter === 'expired' 
+                        ? 'ไม่มีประกาศที่ครบกำหนดปิดหรือหมดอายุ' 
+                        : 'ขณะนี้ยังไม่มีข่าวสารหรือประกาศที่ใช้งานอยู่'}
+                    </p>
+                    {authRole === 'admin' && (
+                      <button
+                        onClick={() => {
+                          setEditingAnnouncement(null);
+                          setNewAnnouncement({
+                            title: '',
+                            content: '',
+                            category: 'water',
+                            startDate: new Date().toISOString().split('T')[0],
+                            endDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                            isPinned: false
+                          });
+                          setIsAnnouncementModalOpen(true);
+                        }}
+                        className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                      >
+                        สร้างประกาศฉบับแรก
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {displayList.map((ann: any) => {
+                    const badge = getAnnouncementCategoryBadge(ann.category);
+                    const CategoryIcon = badge.icon;
+                    const isExpired = ann.endDate && ann.endDate < todayStr;
+
+                    return (
+                      <div
+                        key={ann.id}
+                        className={`bg-white rounded-2xl sm:rounded-3xl border p-5 sm:p-6 shadow-xs flex flex-col justify-between transition hover:shadow-md relative overflow-hidden ${
+                          isExpired ? 'opacity-65 border-gray-200 bg-gray-50/60' : 'border-gray-200'
+                        }`}
+                      >
+                        {/* Top Accent Strip */}
+                        <div className={`absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r ${
+                          ann.category === 'water' ? 'from-cyan-400 to-blue-500' :
+                          ann.category === 'electricity' ? 'from-amber-400 to-orange-500' :
+                          ann.category === 'urgent' ? 'from-rose-500 to-red-600' :
+                          ann.category === 'maintenance' ? 'from-purple-500 to-indigo-600' :
+                          'from-blue-500 to-indigo-600'
+                        }`} />
+
+                        <div>
+                          {/* Badges & Expiry info */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-3 pt-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black border uppercase tracking-wider flex items-center gap-1 ${badge.bg}`}>
+                                <CategoryIcon size={12} />
+                                {badge.label}
+                              </span>
+                              {ann.isPinned && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-0.5">
+                                  📌 ปักหมุด
+                                </span>
+                              )}
+                              {isExpired && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-gray-200 text-gray-700">
+                                  หมดเวลาแล้ว (ซ่อนจากผู้เช่า)
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-bold text-gray-500">
+                              ปิดประกาศ: <span className={`${isExpired ? 'text-red-500 line-through' : 'text-blue-700 font-extrabold'}`}>{ann.endDate}</span>
+                            </span>
+                          </div>
+
+                          <h3 className="text-base sm:text-lg font-black text-gray-900 mb-2 leading-snug">
+                            {ann.title}
+                          </h3>
+
+                          <div className="text-xs sm:text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">
+                            {ann.content}
+                          </div>
+                        </div>
+
+                        {/* Card Footer: Metadata and Admin Actions */}
+                        <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-400">
+                          <div className="flex items-center gap-2">
+                            <span>เริ่ม: {ann.startDate || '-'}</span>
+                            <span>•</span>
+                            <span>โดย {ann.author || 'แอดมิน'}</span>
+                          </div>
+
+                          {authRole === 'admin' && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setEditingAnnouncement(ann);
+                                  setNewAnnouncement({
+                                    title: ann.title || '',
+                                    content: ann.content || '',
+                                    category: ann.category || 'water',
+                                    startDate: ann.startDate || todayStr,
+                                    endDate: ann.endDate || todayStr,
+                                    isPinned: !!ann.isPinned
+                                  });
+                                  setIsAnnouncementModalOpen(true);
+                                }}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="แก้ไขประกาศ"
+                              >
+                                <Settings size={15} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAnnouncement(ann.id, ann.title)}
+                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
+                                title="ลบประกาศ"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </main>
+
+      {/* Announcement Create/Edit Modal */}
+      {isAnnouncementModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100 max-h-[92vh] flex flex-col">
+            <div className="p-5 sm:p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/60">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                  <Megaphone size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-gray-900 leading-tight">
+                    {editingAnnouncement ? 'แก้ไขประกาศ' : 'สร้างประกาศ/แจ้งข่าวสารใหม่'}
+                  </h3>
+                  <p className="text-[11px] text-gray-400">ระบบจะนำไปแสดงให้ผู้เช่าทุกคนเห็น และจะซ่อนอัตโนมัติเมื่อครบกำหนดปิดประกาศ</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => { setIsAnnouncementModalOpen(false); setEditingAnnouncement(null); }} 
+                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAnnouncement} className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1">
+              {/* Category */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 mb-1.5 block">ประเภทประกาศ</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'water', label: 'น้ำประปา', icon: Droplets, color: 'text-cyan-600' },
+                    { id: 'electricity', label: 'ไฟฟ้า', icon: Zap, color: 'text-amber-600' },
+                    { id: 'maintenance', label: 'ซ่อมบำรุง', icon: Wrench, color: 'text-purple-600' },
+                    { id: 'urgent', label: 'ด่วนมาก', icon: AlertTriangle, color: 'text-rose-600' },
+                    { id: 'general', label: 'ข่าวทั่วไป', icon: Megaphone, color: 'text-blue-600' }
+                  ].map(cat => {
+                    const Icon = cat.icon;
+                    const isSelected = newAnnouncement.category === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setNewAnnouncement({ ...newAnnouncement, category: cat.id as any })}
+                        className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition ${
+                          isSelected ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        <Icon size={14} className={cat.color} />
+                        <span>{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 mb-1 block">หัวข้อประกาศ <span className="text-red-500">*</span></label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="เช่น แจ้งงดจ่ายน้ำประปาชั่วคราว, แจ้งซ่อมแซมระบบไฟฟ้า"
+                  value={newAnnouncement.title}
+                  onChange={e => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })}
+                  className="w-full p-3 text-xs sm:text-sm border rounded-xl bg-gray-50/70 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Dates */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 mb-1 block">วันที่เริ่มประกาศ</label>
+                  <input 
+                    type="date" 
+                    required
+                    value={newAnnouncement.startDate}
+                    onChange={e => setNewAnnouncement({ ...newAnnouncement, startDate: e.target.value })}
+                    className="w-full p-2.5 text-xs sm:text-sm border rounded-xl bg-gray-50/70 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-700 mb-1 block">
+                    วันที่ปิดประกาศ (วันหมดอายุ) <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="date" 
+                    required
+                    value={newAnnouncement.endDate}
+                    onChange={e => setNewAnnouncement({ ...newAnnouncement, endDate: e.target.value })}
+                    className="w-full p-2.5 text-xs sm:text-sm border-2 border-blue-400 rounded-xl bg-blue-50/20 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none font-bold text-gray-900"
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block leading-tight">เมื่อพ้นวันนี้ ข่าวจะหายไปจากหน้าผู้เช่าโดยอัตโนมัติ</span>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 mb-1 block">รายละเอียดประกาศ <span className="text-red-500">*</span></label>
+                <textarea 
+                  required
+                  rows={4}
+                  placeholder="ระบุข้อความรายละเอียด เช่น วันเวลาที่จะตัดน้ำ/ไฟ, คำแนะนำสำหรับผู้เช่า, เบอร์ติดต่อกรณีฉุกเฉิน..."
+                  value={newAnnouncement.content}
+                  onChange={e => setNewAnnouncement({ ...newAnnouncement, content: e.target.value })}
+                  className="w-full p-3 text-xs sm:text-sm border rounded-xl bg-gray-50/70 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none leading-relaxed"
+                />
+              </div>
+
+              {/* Pin Switch */}
+              <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-100/80 transition">
+                <input 
+                  type="checkbox"
+                  checked={newAnnouncement.isPinned}
+                  onChange={e => setNewAnnouncement({ ...newAnnouncement, isPinned: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-gray-800 block">📌 ปักหมุดไว้บนสุด (Pinned Announcement)</span>
+                  <span className="text-gray-400 text-[11px]">แสดงเป็นอันดับแรกในกระดานข่าวสารเสมอ</span>
+                </div>
+              </label>
+
+              {/* Submit Buttons */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setIsAnnouncementModalOpen(false); setEditingAnnouncement(null); }}
+                  className="w-1/3 py-2.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="w-2/3 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition flex items-center justify-center gap-1.5"
+                >
+                  <Save size={16} /> บันทึกและเผยแพร่ประกาศ
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Custom Confirmation Dialog Modal */}
       {confirmModal.isOpen && (
