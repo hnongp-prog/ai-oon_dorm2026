@@ -1270,101 +1270,103 @@ const App = () => {
 
   if (!authRole) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-6 bg-gradient-to-br from-gray-100 via-gray-50 to-blue-50/30 font-sans">
-        <div className="bg-white p-6 sm:p-8 md:p-10 rounded-2xl sm:rounded-3xl shadow-xl w-full max-w-sm sm:max-w-md border border-gray-100">
-          <div className="text-center mb-6 sm:mb-8">
-            {!isConfigLoaded ? (
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-gray-50 border-2 border-gray-100 animate-pulse text-blue-500">
-                <Building2 size={28} className="sm:w-8 sm:h-8 opacity-40 animate-pulse" />
-              </div>
-            ) : billConfig.logoUrl ? (
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-white shadow-lg shadow-blue-500/15 border-2 border-gray-100 p-1.5 overflow-hidden transition-all duration-300">
-                <img 
-                  src={billConfig.logoUrl} 
-                  alt={billConfig.dormName || 'Logo'} 
-                  className="w-full h-full object-contain rounded-xl"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-            ) : (
-              <div className="bg-blue-600 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 text-white shadow-lg shadow-blue-500/25">
-                <Building2 size={28} className="sm:w-8 sm:h-8" />
-              </div>
-            )}
-            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-              {billConfig.dormName || (isConfigLoaded ? 'หอพัก' : 'กำลังโหลด...')}
-            </h1>
-            {billConfig.slogan && (
-              <p className="text-xs sm:text-sm text-blue-600 font-semibold mt-1 italic tracking-tight">"{billConfig.slogan}"</p>
-            )}
-            <p className="text-xs sm:text-sm text-gray-400 mt-1">ระบบจัดการหอพักและห้องเช่า</p>
-          </div>
-
-          <div className="space-y-4 sm:space-y-5">
-            <div>
-              <label className="block text-[11px] sm:text-xs font-bold text-gray-500 uppercase mb-1.5 sm:mb-2">สำหรับผู้ดูแลระบบ (Admin)</label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  placeholder="รหัสผ่าน Admin"
-                  className="flex-1 min-w-0 p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-blue-500 focus:bg-white outline-none transition-colors"
-                  value={passwordInput}
-                  onChange={e => setPasswordInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleLogin('admin')}
-                />
-                <button
-                  onClick={() => handleLogin('admin')}
-                  className="bg-blue-600 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shrink-0 text-xs sm:text-sm whitespace-nowrap min-w-[72px] sm:min-w-[80px]"
-                >
-                  แอดมิน
-                </button>
-              </div>
+      <div className="min-h-screen min-h-[100dvh] w-full flex items-center justify-center p-0 sm:p-6 bg-gradient-to-br from-gray-100 via-gray-50 to-blue-50/30 font-sans">
+        <div className="bg-white p-6 sm:p-8 md:p-10 rounded-none sm:rounded-3xl shadow-none sm:shadow-xl w-full min-h-screen min-h-[100dvh] sm:min-h-0 sm:h-auto sm:max-w-md border-0 sm:border sm:border-gray-100 flex flex-col justify-center overflow-y-auto">
+          <div className="w-full max-w-sm mx-auto my-auto py-6 sm:py-0">
+            <div className="text-center mb-6 sm:mb-8">
+              {!isConfigLoaded ? (
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-gray-50 border-2 border-gray-100 animate-pulse text-blue-500">
+                  <Building2 size={28} className="sm:w-8 sm:h-8 opacity-40 animate-pulse" />
+                </div>
+              ) : billConfig.logoUrl ? (
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 bg-white shadow-lg shadow-blue-500/15 border-2 border-gray-100 p-1.5 overflow-hidden transition-all duration-300">
+                  <img 
+                    src={billConfig.logoUrl} 
+                    alt={billConfig.dormName || 'Logo'} 
+                    className="w-full h-full object-contain rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ) : (
+                <div className="bg-blue-600 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 text-white shadow-lg shadow-blue-500/25">
+                  <Building2 size={28} className="sm:w-8 sm:h-8" />
+                </div>
+              )}
+              <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+                {billConfig.dormName || (isConfigLoaded ? 'หอพัก' : 'กำลังโหลด...')}
+              </h1>
+              {billConfig.slogan && (
+                <p className="text-xs sm:text-sm text-blue-600 font-semibold mt-1 italic tracking-tight">"{billConfig.slogan}"</p>
+              )}
+              <p className="text-xs sm:text-sm text-gray-400 mt-1">ระบบจัดการหอพักและห้องเช่า</p>
             </div>
 
-            <div className="border-t border-gray-100 pt-3 sm:pt-4">
-              <label className="block text-[11px] sm:text-xs font-bold text-gray-500 uppercase mb-1.5 sm:mb-2">สำหรับผู้เช่า (Tenant)</label>
-              <div className="flex flex-col gap-2">
-                <input
-                  type="text"
-                  placeholder="Username (เช่น A101)"
-                  className="w-full p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none transition-colors"
-                  value={tenantLoginData.username}
-                  onChange={e => setTenantLoginData({...tenantLoginData, username: e.target.value})}
-                  onKeyDown={e => e.key === 'Enter' && handleLogin('tenant')}
-                />
+            <div className="space-y-4 sm:space-y-5">
+              <div>
+                <label className="block text-[11px] sm:text-xs font-bold text-gray-500 uppercase mb-1.5 sm:mb-2">สำหรับผู้ดูแลระบบ (Admin)</label>
                 <div className="flex gap-2">
                   <input
                     type="password"
-                    placeholder="รหัสผ่านห้องพัก"
-                    className="flex-1 min-w-0 p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none transition-colors"
-                    value={tenantLoginData.password}
-                    onChange={e => setTenantLoginData({...tenantLoginData, password: e.target.value})}
-                    onKeyDown={e => e.key === 'Enter' && handleLogin('tenant')}
+                    placeholder="รหัสผ่าน Admin"
+                    className="flex-1 min-w-0 p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-blue-500 focus:bg-white outline-none transition-colors"
+                    value={passwordInput}
+                    onChange={e => setPasswordInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleLogin('admin')}
                   />
                   <button
-                    onClick={() => handleLogin('tenant')}
-                    className="bg-green-600 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-green-700 active:bg-green-800 transition-colors shadow-sm shrink-0 text-xs sm:text-sm whitespace-nowrap min-w-[72px] sm:min-w-[80px]"
+                    onClick={() => handleLogin('admin')}
+                    className="bg-blue-600 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shrink-0 text-xs sm:text-sm whitespace-nowrap min-w-[72px] sm:min-w-[80px]"
                   >
-                    ผู้เช่า
+                    แอดมิน
                   </button>
                 </div>
               </div>
-            </div>
-            
-            {loginError && <p className="text-red-500 text-[11px] sm:text-xs font-bold text-center mt-1">{loginError}</p>}
 
-            <div className="relative py-1 sm:py-2">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
-              <div className="relative flex justify-center"><span className="bg-white px-3 sm:px-4 text-[10px] sm:text-xs font-bold text-gray-400 uppercase">หรือ</span></div>
-            </div>
+              <div className="border-t border-gray-100 pt-3 sm:pt-4">
+                <label className="block text-[11px] sm:text-xs font-bold text-gray-500 uppercase mb-1.5 sm:mb-2">สำหรับผู้เช่า (Tenant)</label>
+                <div className="flex flex-col gap-2">
+                  <input
+                    type="text"
+                    placeholder="Username (เช่น A101)"
+                    className="w-full p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none transition-colors"
+                    value={tenantLoginData.username}
+                    onChange={e => setTenantLoginData({...tenantLoginData, username: e.target.value})}
+                    onKeyDown={e => e.key === 'Enter' && handleLogin('tenant')}
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="รหัสผ่านห้องพัก"
+                      className="flex-1 min-w-0 p-2.5 sm:p-3 text-xs sm:text-sm border-2 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none transition-colors"
+                      value={tenantLoginData.password}
+                      onChange={e => setTenantLoginData({...tenantLoginData, password: e.target.value})}
+                      onKeyDown={e => e.key === 'Enter' && handleLogin('tenant')}
+                    />
+                    <button
+                      onClick={() => handleLogin('tenant')}
+                      className="bg-green-600 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-green-700 active:bg-green-800 transition-colors shadow-sm shrink-0 text-xs sm:text-sm whitespace-nowrap min-w-[72px] sm:min-w-[80px]"
+                    >
+                      ผู้เช่า
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              {loginError && <p className="text-red-500 text-[11px] sm:text-xs font-bold text-center mt-1">{loginError}</p>}
 
-            <button
-              onClick={() => handleLogin('guest')}
-              className="w-full py-2.5 sm:py-3 px-3 bg-gray-50 hover:bg-gray-100 text-gray-700 border-2 border-gray-200 hover:border-gray-300 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 text-xs sm:text-sm leading-tight text-center"
-            >
-              <User size={16} className="shrink-0 text-gray-500 sm:w-4 sm:h-4" /> 
-              <span className="truncate">เข้าใช้งานดูห้องพัก/จองห้อง (Guest)</span>
-            </button>
+              <div className="relative py-1 sm:py-2">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
+                <div className="relative flex justify-center"><span className="bg-white px-3 sm:px-4 text-[10px] sm:text-xs font-bold text-gray-400 uppercase">หรือ</span></div>
+              </div>
+
+              <button
+                onClick={() => handleLogin('guest')}
+                className="w-full py-2.5 sm:py-3 px-3 bg-gray-50 hover:bg-gray-100 text-gray-700 border-2 border-gray-200 hover:border-gray-300 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 text-xs sm:text-sm leading-tight text-center"
+              >
+                <User size={16} className="shrink-0 text-gray-500 sm:w-4 sm:h-4" /> 
+                <span className="truncate">เข้าใช้งานดูห้องพัก/จองห้อง (Guest)</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
